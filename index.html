@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>交互式排版引擎与分页预览工具</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <h1>📄 交互式排版引擎</h1>
+            <div class="header-actions">
+                <button id="btn-export" class="btn btn-primary">📥 导出 HTML</button>
+            </div>
+        </header>
+
+        <div class="main-layout">
+            <!-- 左侧：内容编辑区 -->
+            <aside class="panel panel-left">
+                <div class="panel-header">
+                    <h2>📝 内容编辑</h2>
+                </div>
+                <div class="panel-body">
+                    <div class="document-title-input">
+                        <label>文档标题</label>
+                        <input type="text" id="doc-title" value="未命名文档" placeholder="输入文档标题（用于页眉）">
+                    </div>
+                    
+                    <div class="block-adders">
+                        <button class="btn btn-block-add" data-type="h1">+ 标题 H1</button>
+                        <button class="btn btn-block-add" data-type="h2">+ 标题 H2</button>
+                        <button class="btn btn-block-add" data-type="h3">+ 标题 H3</button>
+                        <button class="btn btn-block-add" data-type="paragraph">+ 正文段落</button>
+                        <button class="btn btn-block-add" data-type="image">+ 图片占位</button>
+                        <button class="btn btn-block-add" data-type="table">+ 表格</button>
+                        <button class="btn btn-block-add" data-type="footnote">+ 脚注引用</button>
+                    </div>
+
+                    <div id="blocks-list" class="blocks-list"></div>
+                </div>
+            </aside>
+
+            <!-- 中间：预览区 -->
+            <main class="panel panel-center">
+                <div class="panel-header preview-header">
+                    <h2>👀 分页预览</h2>
+                    <div class="preview-controls">
+                        <label>缩放：</label>
+                        <select id="zoom-select">
+                            <option value="0.5">50%</option>
+                            <option value="0.75">75%</option>
+                            <option value="1" selected>100%</option>
+                            <option value="1.25">125%</option>
+                            <option value="1.5">150%</option>
+                            <option value="2">200%</option>
+                        </select>
+                        <span id="page-info" class="page-info">第 1 页 / 共 1 页</span>
+                    </div>
+                </div>
+                <div class="panel-body preview-body">
+                    <div id="preview-container" class="preview-container"></div>
+                </div>
+            </main>
+
+            <!-- 右侧：参数配置 -->
+            <aside class="panel panel-right">
+                <div class="panel-header">
+                    <h2>⚙️ 排版参数</h2>
+                </div>
+                <div class="panel-body params-body">
+                    <div class="param-group">
+                        <h3>纸张尺寸</h3>
+                        <div class="param-row">
+                            <label>预设</label>
+                            <select id="paper-preset">
+                                <option value="a4-portrait" selected>A4 纵向 (210×297mm)</option>
+                                <option value="a4-landscape">A4 横向 (297×210mm)</option>
+                                <option value="a5-portrait">A5 纵向 (148×210mm)</option>
+                                <option value="a5-landscape">A5 横向 (210×148mm)</option>
+                                <option value="letter-portrait">Letter 纵向 (216×279mm)</option>
+                                <option value="custom">自定义</option>
+                            </select>
+                        </div>
+                        <div class="param-row param-dual">
+                            <div>
+                                <label>宽度 (mm)</label>
+                                <input type="number" id="page-width" value="210" min="50" max="1000">
+                            </div>
+                            <div>
+                                <label>高度 (mm)</label>
+                                <input type="number" id="page-height" value="297" min="50" max="2000">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="param-group">
+                        <h3>页边距</h3>
+                        <div class="param-row param-dual">
+                            <div>
+                                <label>上边距 (mm)</label>
+                                <input type="number" id="margin-top" value="20" min="0" max="100">
+                            </div>
+                            <div>
+                                <label>下边距 (mm)</label>
+                                <input type="number" id="margin-bottom" value="20" min="0" max="100">
+                            </div>
+                        </div>
+                        <div class="param-row param-dual">
+                            <div>
+                                <label>左边距 (mm)</label>
+                                <input type="number" id="margin-left" value="20" min="0" max="100">
+                            </div>
+                            <div>
+                                <label>右边距 (mm)</label>
+                                <input type="number" id="margin-right" value="20" min="0" max="100">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="param-group">
+                        <h3>字体与间距</h3>
+                        <div class="param-row">
+                            <label>正文字号 (pt)</label>
+                            <input type="number" id="font-size" value="12" min="6" max="72" step="0.5">
+                        </div>
+                        <div class="param-row">
+                            <label>行间距</label>
+                            <input type="number" id="line-height" value="1.5" min="1" max="3" step="0.1">
+                        </div>
+                        <div class="param-row">
+                            <label>段间距 (行高倍数)</label>
+                            <input type="number" id="paragraph-spacing" value="0.5" min="0" max="3" step="0.1">
+                        </div>
+                        <div class="param-row">
+                            <label>正文字体</label>
+                            <select id="font-family">
+                                <option value='"Noto Serif SC", "Source Han Serif SC", "SimSun", serif' selected>宋体</option>
+                                <option value='"Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif'>黑体</option>
+                                <option value='"KaiTi", "STKaiti", serif'>楷体</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="param-group">
+                        <h3>页眉页脚</h3>
+                        <div class="param-row">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="show-header" checked>
+                                显示页眉
+                            </label>
+                        </div>
+                        <div class="param-row">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="show-page-number" checked>
+                                显示页码
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <!-- 块编辑弹窗 -->
+    <div id="block-editor-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">编辑内容块</h3>
+                <button class="modal-close" id="modal-close">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-body"></div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="modal-cancel">取消</button>
+                <button class="btn btn-primary" id="modal-save">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/types.js"></script>
+    <script src="js/linebreaker.js"></script>
+    <script src="js/paginator.js"></script>
+    <script src="js/editor.js"></script>
+    <script src="js/preview.js"></script>
+    <script src="js/exporter.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
