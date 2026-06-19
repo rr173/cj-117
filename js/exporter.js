@@ -366,29 +366,31 @@ ${pageCss}
 
     _renderLineSegments(segments) {
         let html = '';
+        const usedFootnoteNums = new Set();
+
         segments.forEach(seg => {
             const styles = seg.styles || [];
             const classes = [];
-            let hasFootnote = false;
             let fnNum = null;
 
             styles.forEach(s => {
                 if (s.type === window.Types.InlineStyleType.BOLD) classes.push('inline-bold');
                 if (s.type === window.Types.InlineStyleType.ITALIC) classes.push('inline-italic');
                 if (s.type === window.Types.InlineStyleType.FOOTNOTE_REF) {
-                    hasFootnote = true;
-                    fnNum = s.footnoteNumber;
+                    if (s.footnoteNumber != null && !usedFootnoteNums.has(s.footnoteNumber)) {
+                        fnNum = s.footnoteNumber;
+                        usedFootnoteNums.add(s.footnoteNumber);
+                    }
                 }
             });
 
-            const text = this._escapeHtml(seg.text);
             const classAttr = classes.length ? ` class="${classes.join(' ')}"` : '';
+            let cleanText = this._escapeHtml(seg.text).replace(/¹|²|\[ref\]/g, '');
 
-            if (hasFootnote) {
-                const cleanText = text.replace('¹', '').replace('[ref]', '');
-                html += `<span${classAttr}>${cleanText}<sup class="footnote-ref">${fnNum || ''}</sup></span>`;
+            if (fnNum != null) {
+                html += `<span${classAttr}>${cleanText}<sup class="footnote-ref">${fnNum}</sup></span>`;
             } else {
-                html += `<span${classAttr}>${text}</span>`;
+                html += `<span${classAttr}>${cleanText}</span>`;
             }
         });
         return html;

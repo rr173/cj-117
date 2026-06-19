@@ -305,6 +305,7 @@ class PaginationEngine {
                                 blockId: block.id
                             });
                         }
+                        ref.footnoteNumber = this.footnoteMap[ref.footnoteId];
                     }
 
                     if (currentTop + totalHeight <= page.availableBottom) {
@@ -446,25 +447,21 @@ class PaginationEngine {
                     });
 
                     const refText = block.data.refText || '';
-                    const fullText = refText + '[ref]';
-                    const lines = this.getParagraphLines(fullText, [new window.Types.InlineStyle(
+                    const fullText = refText + '²';
+                    const fnStyle = new window.Types.InlineStyle(
                         window.Types.InlineStyleType.FOOTNOTE_REF,
                         refText.length,
                         fullText.length,
                         { footnoteNumber: footnoteNum }
-                    )]);
+                    );
+                    const lines = this.getParagraphLines(fullText, [fnStyle]);
 
                     const height = lines.length * this.layoutParams.lineHeightPx;
                     if (currentTop + height <= page.availableBottom) {
                         const piece = new RenderedBlockPiece(block.id, blockType, {
                             lines: lines,
                             text: fullText,
-                            inlineStyles: [new window.Types.InlineStyle(
-                                window.Types.InlineStyleType.FOOTNOTE_REF,
-                                refText.length,
-                                fullText.length,
-                                { footnoteNumber: footnoteNum }
-                            )],
+                            inlineStyles: [fnStyle],
                             footnoteNumber: footnoteNum
                         });
                         piece.height = height;
@@ -557,6 +554,7 @@ class PaginationEngine {
                                     blockId: block.id
                                 });
                             }
+                            ref.footnoteNumber = this.footnoteMap[ref.footnoteId];
                         }
 
                         const newOffset = endLine;

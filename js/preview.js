@@ -224,15 +224,14 @@ class PreviewRenderer {
 
     _renderLineWithStyles(segments) {
         let html = '';
+        const usedFootnoteNums = new Set();
 
         segments.forEach(seg => {
             let text = seg.text;
-            let hasFootnoteRef = false;
             let footnoteNum = null;
 
             const styles = seg.styles || [];
             const classes = [];
-            const attrs = [];
 
             styles.forEach(s => {
                 if (s.type === window.Types.InlineStyleType.BOLD) {
@@ -240,8 +239,10 @@ class PreviewRenderer {
                 } else if (s.type === window.Types.InlineStyleType.ITALIC) {
                     classes.push('inline-italic');
                 } else if (s.type === window.Types.InlineStyleType.FOOTNOTE_REF) {
-                    hasFootnoteRef = true;
-                    footnoteNum = s.footnoteNumber;
+                    if (s.footnoteNumber != null && !usedFootnoteNums.has(s.footnoteNumber)) {
+                        footnoteNum = s.footnoteNumber;
+                        usedFootnoteNums.add(s.footnoteNumber);
+                    }
                 }
             });
 
@@ -250,11 +251,11 @@ class PreviewRenderer {
                 classAttr = ` class="${classes.join(' ')}"`;
             }
 
-            const escapedText = this._escapeHtml(text);
+            let escapedText = this._escapeHtml(text)
+                .replace(/¹|²|\[ref\]/g, '');
 
-            if (hasFootnoteRef) {
-                const displayText = escapedText.replace('¹', '').replace('[ref]', '');
-                html += `<span${classAttr}>${displayText}<sup class="footnote-ref">${footnoteNum || ''}</sup></span>`;
+            if (footnoteNum != null) {
+                html += `<span${classAttr}>${escapedText}<sup class="footnote-ref">${footnoteNum}</sup></span>`;
             } else {
                 html += `<span${classAttr}>${escapedText}</span>`;
             }
