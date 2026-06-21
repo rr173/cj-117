@@ -28,6 +28,8 @@
                     </div>
                     
                     <div class="block-adders">
+                        <button class="btn btn-block-add" data-type="toc">+ 目录</button>
+                        <button class="btn btn-block-add" data-type="crossref">+ 交叉引用</button>
                         <button class="btn btn-block-add" data-type="h1">+ 标题 H1</button>
                         <button class="btn btn-block-add" data-type="h2">+ 标题 H2</button>
                         <button class="btn btn-block-add" data-type="h3">+ 标题 H3</button>
@@ -157,6 +159,16 @@
                             </label>
                         </div>
                     </div>
+
+                    <div class="param-group">
+                        <h3>编号与引用</h3>
+                        <div class="param-row">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="auto-number-heading" checked>
+                                标题自动编号
+                            </label>
+                        </div>
+                    </div>
                 </div>
             </aside>
         </div>
@@ -179,6 +191,7 @@
 
     <script src="js/types.js"></script>
     <script src="js/linebreaker.js"></script>
+    <script src="js/documentProcessor.js"></script>
     <script src="js/paginator.js"></script>
     <script src="js/editor.js"></script>
     <script src="js/preview.js"></script>

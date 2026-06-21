@@ -54,6 +54,7 @@ class PaginationEngine {
         this.pages = [];
         this.footnoteCounter = 0;
         this.footnoteMap = {};
+        this.documentProcessor = null;
     }
 
     setParams(params) {
@@ -62,6 +63,10 @@ class PaginationEngine {
 
     setBlocks(blocks) {
         this.blocks = blocks;
+    }
+
+    setDocumentProcessor(dp) {
+        this.documentProcessor = dp;
     }
 
     getHeadingHeight(level) {
@@ -132,6 +137,18 @@ class PaginationEngine {
         let totalHeight = 0;
         let usedRows = 0;
 
+        if (startRow === 0 && block.data.caption) {
+            const captionFontSize = this.layoutParams.fontSizePx * 0.9;
+            const captionLineHeight = this.layoutParams.lineHeightPx * 0.9;
+            const captionLines = window.LineBreaker.breakLinesMinRaggedness(
+                block.data.caption,
+                this.layoutParams.contentWidthPx,
+                captionFontSize,
+                this.layoutParams.fontFamily
+            );
+            totalHeight += captionLines.length * captionLineHeight + 6;
+        }
+
         if (startRow === 0) {
             let headerMaxLines = 1;
             for (const h of headers) {
@@ -189,6 +206,20 @@ class PaginationEngine {
         }
 
         return totalHeight;
+    }
+
+    getTocHeight(block) {
+        if (!this.documentProcessor) {
+            const titleFontSizePt = this.layoutParams.getHeadingFontSize(1);
+            const titleFontSizePx = ptToPx(titleFontSizePt);
+            const titleLineHeight = titleFontSizePx * Math.max(1.2, this.layoutParams.lineHeight - 0.2);
+            return titleLineHeight + this.layoutParams.paragraphSpacingPx + 5 * this.layoutParams.lineHeightPx;
+        }
+        return this.documentProcessor.calculateTocHeight(this.layoutParams, window.LineBreaker);
+    }
+
+    getCrossRefHeight(block) {
+        return this.layoutParams.lineHeightPx;
     }
 
     splitParagraphLinesForPage(lines, startLine, availableHeight, requireComplete = false) {
@@ -309,7 +340,7 @@ class PaginationEngine {
                     }
 
                     if (currentTop + totalHeight <= page.availableBottom) {
-                        if (isAfterHeading && lines.length < 2) {
+                        if (isAfterHeading && lines.length < 2 && pieces.length > 0) {
                             return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: 0, footnotes: pageFootnotes };
                         }
                         const piece = new RenderedBlockPiece(block.id, blockType, {
@@ -329,7 +360,7 @@ class PaginationEngine {
                             return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: 0, footnotes: pageFootnotes };
                         }
 
-                        if (isAfterHeading) {
+                        if (isAfterHeading && pieces.length > 0) {
                             if (availableLines < 2) {
                                 return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: 0, footnotes: pageFootnotes };
                             }
@@ -401,6 +432,7 @@ class PaginationEngine {
                             headers: block.data.headers,
                             rows: block.data.rows,
                             columns: block.data.columns,
+                            caption: block.data.caption || '',
                             startRow: 0,
                             rowCount: block.data.rows.length,
                             repeatedHeader: false
@@ -417,6 +449,7 @@ class PaginationEngine {
                                 headers: block.data.headers,
                                 rows: block.data.rows,
                                 columns: block.data.columns,
+                                caption: block.data.caption || '',
                                 startRow: 0,
                                 rowCount: partialInfo.rowsRendered,
                                 partial: true,
@@ -468,6 +501,52 @@ class PaginationEngine {
                         piece.width = this.layoutParams.contentWidthPx;
                         pieces.push({ piece, top: currentTop });
                         currentTop += height + this.layoutParams.paragraphSpacingPx;
+                        currentBlockIndex++;
+                    } else {
+                        return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: 0, footnotes: pageFootnotes };
+                    }
+                    break;
+                }
+
+                case window.Types.BlockType.TOC: {
+                    const tocHeight = this.getTocHeight(block);
+                    if (currentTop + tocHeight <= page.availableBottom) {
+                        const piece = new RenderedBlockPiece(block.id, blockType, {
+                            title: block.data.title || '目录'
+                        });
+                        piece.height = tocHeight;
+                        piece.width = this.layoutParams.contentWidthPx;
+                        pieces.push({ piece, top: currentTop });
+                        currentTop += tocHeight + this.layoutParams.paragraphSpacingPx;
+                        currentBlockIndex++;
+                    } else {
+                        if (currentTop === startOffset && pieces.length === 0) {
+                            const piece = new RenderedBlockPiece(block.id, blockType, {
+                                title: block.data.title || '目录'
+                            });
+                            piece.height = tocHeight;
+                            piece.width = this.layoutParams.contentWidthPx;
+                            pieces.push({ piece, top: currentTop });
+                            currentTop += tocHeight;
+                            currentBlockIndex++;
+                        } else {
+                            return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: 0, footnotes: pageFootnotes };
+                        }
+                    }
+                    break;
+                }
+
+                case window.Types.BlockType.CROSS_REF: {
+                    const refHeight = this.getCrossRefHeight(block);
+                    if (currentTop + refHeight <= page.availableBottom) {
+                        const piece = new RenderedBlockPiece(block.id, blockType, {
+                            targetId: block.data.targetId,
+                            targetType: block.data.targetType
+                        });
+                        piece.height = refHeight;
+                        piece.width = this.layoutParams.contentWidthPx;
+                        pieces.push({ piece, top: currentTop });
+                        currentTop += refHeight + this.layoutParams.paragraphSpacingPx;
                         currentBlockIndex++;
                     } else {
                         return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: 0, footnotes: pageFootnotes };
@@ -590,12 +669,14 @@ class PaginationEngine {
                             headers: block.data.headers,
                             rows: block.data.rows,
                             columns: block.data.columns,
+                            caption: block.data.caption || '',
                             startRow: partialOffset,
                             rowCount: tableInfo.rowsRendered,
                             partial: tableInfo.nextRow < block.data.rows.length,
                             continuation: true,
                             nextRow: tableInfo.nextRow,
-                            repeatedHeader: true
+                            repeatedHeader: true,
+                            hideCaption: true
                         });
                         piece.height = tableInfo.height;
                         piece.width = this.layoutParams.contentWidthPx;

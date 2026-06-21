@@ -287,8 +287,11 @@ class ContentEditor {
 
             case window.Types.BlockType.TABLE:
                 const colCount = block.data.columns;
-                let tableHtml = `<small style="color:#6c757d">📊 表格 ${colCount}列 × ${block.data.rows.length}行</small><br>`;
-                tableHtml += '<table style="width:100%;font-size:10px;border-collapse:collapse;margin-top:4px;">';
+                let tableHtml = `<small style="color:#6c757d">📊 表格 ${colCount}列 × ${block.data.rows.length}行</small>`;
+                if (block.data.caption) {
+                    tableHtml += `<br><small style="color:#495057;font-weight:600;">${this._escapeHtml(block.data.caption)}</small>`;
+                }
+                tableHtml += '<br><table style="width:100%;font-size:10px;border-collapse:collapse;margin-top:4px;">';
                 tableHtml += '<tr style="background:#e9ecef">';
                 block.data.headers.forEach(h => {
                     tableHtml += `<th style="border:1px solid #dee2e6;padding:2px 4px;">${this._escapeHtml(h)}</th>`;
@@ -317,6 +320,33 @@ class ContentEditor {
                     </div>
                 `;
                 break;
+
+            case window.Types.BlockType.TOC:
+                preview.innerHTML = `
+                    <div style="padding:8px;background:#e8f4fc;border:1px dashed #74b9ff;border-radius:4px;text-align:center;">
+                        📑 <strong>${this._escapeHtml(block.data.title || '目录')}</strong>
+                        <br><small style="color:#6c757d">（自动生成，扫描全文标题）</small>
+                    </div>
+                `;
+                break;
+
+            case window.Types.BlockType.CROSS_REF: {
+                let targetLabel = '未选择目标';
+                if (block.data.targetType === window.Types.CrossRefTargetType.HEADING) {
+                    targetLabel = '📌 标题';
+                } else if (block.data.targetType === window.Types.CrossRefTargetType.IMAGE) {
+                    targetLabel = '🖼️ 图片';
+                } else if (block.data.targetType === window.Types.CrossRefTargetType.TABLE) {
+                    targetLabel = '📊 表格';
+                }
+                preview.innerHTML = `
+                    <div style="padding:8px;background:#fff3cd;border:1px dashed #fdcb6e;border-radius:4px;">
+                        🔗 交叉引用 → <strong>${targetLabel}</strong>
+                        ${block.data.targetId ? `<br><small style="color:#6c757d">目标ID: ${this._escapeHtml(block.data.targetId)}</small>` : '<br><small style="color:#d63031">请双击编辑选择引用目标</small>'}
+                    </div>
+                `;
+                break;
+            }
 
             default:
                 preview.textContent = '未知类型';
@@ -419,9 +449,57 @@ class ContentEditor {
             case window.Types.BlockType.FOOTNOTE_REF:
                 modalBody.innerHTML = this._createFootnoteEditor(block);
                 break;
+
+            case window.Types.BlockType.TOC:
+                modalBody.innerHTML = this._createTocEditor(block);
+                break;
+
+            case window.Types.BlockType.CROSS_REF:
+                modalBody.innerHTML = this._createCrossRefEditor(block);
+                this._initCrossRefEditorEvents(block);
+                break;
         }
 
         this.modal.classList.remove('hidden');
+    }
+
+    _initCrossRefEditorEvents(block) {
+        const editor = this;
+        const targetTypeSelect = document.getElementById('edit-ref-target-type');
+        const targetIdSelect = document.getElementById('edit-ref-target-id');
+
+        targetTypeSelect.addEventListener('change', () => {
+            editor._updateCrossRefTargetOptions(targetTypeSelect.value, block.data.targetId);
+        });
+
+        this._updateCrossRefTargetOptions(targetTypeSelect.value, block.data.targetId);
+    }
+
+    _updateCrossRefTargetOptions(selectedType, currentTargetId) {
+        const dp = window.app ? window.app.documentProcessor : null;
+        const targetIdSelect = document.getElementById('edit-ref-target-id');
+
+        if (!dp) {
+            targetIdSelect.innerHTML = '<option value="">（系统初始化中）</option>';
+            return;
+        }
+
+        const allTargets = dp.getAvailableTargets();
+        const filteredTargets = allTargets.filter(t => t.type === selectedType);
+
+        if (filteredTargets.length === 0) {
+            const typeName = {
+                heading: '标题',
+                image: '图片',
+                table: '表格'
+            }[selectedType] || selectedType;
+            targetIdSelect.innerHTML = `<option value="">（暂无可用的${typeName}，请先添加）</option>`;
+            return;
+        }
+
+        targetIdSelect.innerHTML = filteredTargets.map(t =>
+            `<option value="${t.id}" data-type="${t.type}" ${currentTargetId === t.id ? 'selected' : ''}>${this._escapeHtml(t.label)}</option>`
+        ).join('');
     }
 
     _createHeadingEditor(block) {
@@ -476,6 +554,10 @@ class ContentEditor {
 
     _createTableEditor(block) {
         let html = `
+            <div class="form-group">
+                <label>表格标题</label>
+                <input type="text" id="edit-table-caption" value="${this._escapeHtml(block.data.caption || '')}" placeholder="例如：功能模块对比表">
+            </div>
             <div class="form-group">
                 <label>列数</label>
                 <div style="display:flex;gap:8px;align-items:center;">
@@ -590,6 +672,58 @@ class ContentEditor {
         `;
     }
 
+    _createTocEditor(block) {
+        return `
+            <div class="form-group">
+                <label>目录标题</label>
+                <input type="text" id="edit-toc-title" value="${this._escapeHtml(block.data.title || '目录')}" placeholder="例如：目录、目次">
+            </div>
+            <div class="form-hint">
+                目录内容会自动扫描全文的 H1、H2、H3 标题并生成带层级缩进和页码的条目。<br>
+                修改标题内容或顺序后，目录会自动更新。
+            </div>
+        `;
+    }
+
+    _createCrossRefEditor(block) {
+        const dp = window.app ? window.app.documentProcessor : null;
+        const targets = dp ? dp.getAvailableTargets() : [];
+
+        const typeOptions = `
+            <option value="${window.Types.CrossRefTargetType.HEADING}" ${block.data.targetType === window.Types.CrossRefTargetType.HEADING ? 'selected' : ''}>标题</option>
+            <option value="${window.Types.CrossRefTargetType.IMAGE}" ${block.data.targetType === window.Types.CrossRefTargetType.IMAGE ? 'selected' : ''}>图片</option>
+            <option value="${window.Types.CrossRefTargetType.TABLE}" ${block.data.targetType === window.Types.CrossRefTargetType.TABLE ? 'selected' : ''}>表格</option>
+        `;
+
+        let targetOptions = '<option value="">（请先选择引用目标类型）</option>';
+        if (targets.length > 0) {
+            targetOptions = targets.map(t =>
+                `<option value="${t.id}" data-type="${t.type}" ${block.data.targetId === t.id ? 'selected' : ''}>${this._escapeHtml(t.label)}</option>`
+            ).join('');
+        } else {
+            targetOptions = '<option value="">（暂无可用目标，请先添加标题、图片或表格）</option>';
+        }
+
+        return `
+            <div class="form-group">
+                <label>引用目标类型</label>
+                <select id="edit-ref-target-type">
+                    ${typeOptions}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>选择引用目标</label>
+                <select id="edit-ref-target-id">
+                    ${targetOptions}
+                </select>
+            </div>
+            <div class="form-hint">
+                交叉引用会在预览中自动显示为目标的编号和页码（如"图3(第5页)"、"第2.1节(第3页)"）。<br>
+                当目标内容移动或编号变化时，所有引用会自动更新。
+            </div>
+        `;
+    }
+
     closeModal() {
         this.modal.classList.add('hidden');
         this.editingBlockId = null;
@@ -626,8 +760,9 @@ class ContentEditor {
             }
 
             case window.Types.BlockType.TABLE: {
+                const caption = document.getElementById('edit-table-caption').value;
                 const data = this._collectTableData();
-                this.updateBlock(block.id, { headers: data.headers, rows: data.rows });
+                this.updateBlock(block.id, { caption, headers: data.headers, rows: data.rows });
                 break;
             }
 
@@ -635,6 +770,22 @@ class ContentEditor {
                 const refText = document.getElementById('edit-ref-text').value;
                 const footnoteText = document.getElementById('edit-footnote-text').value;
                 this.updateBlock(block.id, { refText, footnoteText });
+                break;
+            }
+
+            case window.Types.BlockType.TOC: {
+                const title = document.getElementById('edit-toc-title').value;
+                this.updateBlock(block.id, { title });
+                break;
+            }
+
+            case window.Types.BlockType.CROSS_REF: {
+                const targetType = document.getElementById('edit-ref-target-type').value;
+                const targetSelect = document.getElementById('edit-ref-target-id');
+                const targetId = targetSelect.value;
+                const selectedOption = targetSelect.options[targetSelect.selectedIndex];
+                const finalTargetType = selectedOption && selectedOption.dataset.type ? selectedOption.dataset.type : targetType;
+                this.updateBlock(block.id, { targetId, targetType: finalTargetType });
                 break;
             }
         }

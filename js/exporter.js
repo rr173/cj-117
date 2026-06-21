@@ -3,12 +3,22 @@ class HtmlExporter {
         this.pages = [];
         this.layoutParams = null;
         this.docTitle = '未命名文档';
+        this.documentProcessor = null;
+        this.pageNumberOffset = 0;
     }
 
     setData(pages, layoutParams, docTitle) {
         this.pages = pages;
         this.layoutParams = layoutParams;
         this.docTitle = docTitle || '未命名文档';
+    }
+
+    setDocumentProcessor(dp) {
+        this.documentProcessor = dp;
+    }
+
+    setPageNumberOffset(offset) {
+        this.pageNumberOffset = offset;
     }
 
     exportToHtml() {
@@ -261,6 +271,67 @@ html, body {
     font-style: italic;
 }
 
+.heading-anchor {
+    display: block;
+    position: relative;
+    top: -5mm;
+    visibility: hidden;
+}
+
+.heading-number {
+    font-weight: 700;
+}
+
+.toc-title {
+    margin-bottom: 4mm;
+}
+
+.toc-entries {
+    line-height: 1.6;
+}
+
+.toc-entry {
+    margin-bottom: 1mm;
+}
+
+.toc-link {
+    cursor: pointer;
+}
+
+.toc-link:hover {
+    color: #0984e3 !important;
+}
+
+.toc-dot-leader {
+    display: inline-block;
+}
+
+.toc-page {
+    font-variant-numeric: tabular-nums;
+}
+
+.rendered-table-caption {
+    margin-bottom: 2mm;
+}
+
+.cross-ref {
+    cursor: default;
+}
+
+.cross-ref-invalid {
+    color: #d63031;
+    font-weight: 600;
+}
+
+.cross-ref-valid {
+    color: #0984e3;
+    cursor: pointer;
+}
+
+.cross-ref-valid:hover {
+    text-decoration: underline !important;
+}
+
 ${pageCss}
 </style>`;
     }
@@ -291,7 +362,8 @@ ${pageCss}
             html += `</div>`;
 
             if (this.layoutParams.showPageNumber) {
-                html += `<div class="page-footer">— ${pageIdx + 1} —</div>`;
+                const displayPageNum = pageIdx - this.pageNumberOffset + 1;
+                html += `<div class="page-footer">— ${displayPageNum} —</div>`;
             }
 
             html += `</div>`;
@@ -326,6 +398,12 @@ ${pageCss}
             case window.Types.BlockType.FOOTNOTE_REF:
                 innerHtml = this._renderParagraphPiece(piece);
                 break;
+            case window.Types.BlockType.TOC:
+                innerHtml = this._renderTocPiece(piece);
+                break;
+            case window.Types.BlockType.CROSS_REF:
+                innerHtml = this._renderCrossRefPiece(piece);
+                break;
         }
 
         return `<div class="rendered-block rendered-${piece.type}" style="top:${topMm}mm; height:${heightMm}mm;">${innerHtml}</div>`;
@@ -339,12 +417,31 @@ ${pageCss}
         const lineHeightPx = fontSizePx * Math.max(1.2, this.layoutParams.lineHeight - 0.2);
         const lineHeightMm = this._pxToMm(lineHeightPx);
 
-        let html = '';
-        lines.forEach(line => {
+        let html = `<a id="heading-${piece.blockId}" class="heading-anchor"></a>`;
+        let numberPrefix = '';
+        if (this.documentProcessor) {
+            const headingInfo = this.documentProcessor.headingInfo.get(piece.blockId);
+            if (headingInfo && this.layoutParams.autoNumberHeading && headingInfo.number) {
+                numberPrefix = `<span class="heading-number">${headingInfo.number} </span>`;
+            }
+        }
+
+        lines.forEach((line, idx) => {
             html += `<span class="rendered-line" style="height:${lineHeightMm}mm; line-height:${lineHeightMm}mm;">`;
+            if (idx === 0 && numberPrefix) {
+                html += numberPrefix;
+            }
             html += this._renderLineSegments(line.segments || []);
             html += `</span>`;
         });
+
+        if (lines.length === 0) {
+            let displayText = piece.data.text || '';
+            if (this.documentProcessor) {
+                displayText = this.documentProcessor.getHeadingDisplay(piece.blockId) || displayText;
+            }
+            html += this._escapeHtml(displayText);
+        }
 
         return html;
     }
@@ -404,14 +501,20 @@ ${pageCss}
         const imgHeightMm = this._pxToMm(imgHeightPx);
         const captionFontSizePt = this.layoutParams.fontSizePt * 0.85;
 
-        let html = `<div style="width:100%;height:${imgHeightMm}mm;background:repeating-linear-gradient(45deg,#f8f9fa,#f8f9fa 5mm,#e9ecef 5mm,#e9ecef 10mm);border:1pt dashed #adb5bd;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:4mm;box-sizing:border-box;">`;
+        let displayCaption = piece.data.caption || '';
+        if (this.documentProcessor) {
+            displayCaption = this.documentProcessor.getImageCaption(piece.blockId) || displayCaption;
+        }
+
+        let html = `<a id="image-${piece.blockId}" class="heading-anchor"></a>`;
+        html += `<div style="width:100%;height:${imgHeightMm}mm;background:repeating-linear-gradient(45deg,#f8f9fa,#f8f9fa 5mm,#e9ecef 5mm,#e9ecef 10mm);border:1pt dashed #adb5bd;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:4mm;box-sizing:border-box;">`;
         html += `<div style="font-size:${this.layoutParams.fontSizePt}pt;color:#6c757d;">🖼️ ${this._escapeHtml(piece.data.altText || '图片占位')}</div>`;
         html += `<div style="font-size:${this.layoutParams.fontSizePt * 0.7}pt;color:#adb5bd;margin-top:1mm;">${piece.data.aspectRatio}</div>`;
         html += `</div>`;
 
-        if (piece.data.caption) {
+        if (displayCaption) {
             const captionLines = window.LineBreaker.breakLinesMinRaggedness(
-                piece.data.caption,
+                displayCaption,
                 contentWidthPx,
                 ptToPx(captionFontSizePt),
                 this.layoutParams.fontFamily
@@ -434,7 +537,32 @@ ${pageCss}
         const fontSizePt = this.layoutParams.fontSizePt * 0.9;
         const lineHeight = 1.3;
 
-        let html = `<table class="rendered-table" style="font-size:${fontSizePt}pt;line-height:${lineHeight};">`;
+        let displayCaption = piece.data.caption || '';
+        if (this.documentProcessor) {
+            displayCaption = this.documentProcessor.getTableCaption(piece.blockId) || displayCaption;
+        }
+
+        let html = '';
+
+        if (displayCaption && !data.continuation) {
+            const captionFontSizePt = this.layoutParams.fontSizePt * 0.9;
+            const captionLineHeightPx = this.layoutParams.lineHeightPx * 0.9;
+            const captionLineHeightMm = this._pxToMm(captionLineHeightPx);
+            const captionLines = window.LineBreaker.breakLinesMinRaggedness(
+                displayCaption,
+                this.layoutParams.contentWidthPx,
+                ptToPx(captionFontSizePt),
+                this.layoutParams.fontFamily
+            );
+            html += `<div class="rendered-table-caption" style="font-size:${captionFontSizePt}pt;margin-bottom:2mm;text-align:center;color:#495057;font-weight:600;">`;
+            captionLines.forEach(line => {
+                html += `<span class="rendered-line" style="display:block;line-height:${captionLineHeightMm}mm;">${this._renderLineSegments(line.segments || [])}</span>`;
+            });
+            html += `</div>`;
+        }
+
+        html += `<a id="table-${piece.blockId}" class="heading-anchor"></a>`;
+        html += `<table class="rendered-table" style="font-size:${fontSizePt}pt;line-height:${lineHeight};">`;
 
         const showHeader = data.startRow === 0 || data.repeatedHeader;
         if (showHeader) {
@@ -457,6 +585,76 @@ ${pageCss}
         }
         html += '</tbody>';
         html += '</table>';
+
+        return html;
+    }
+
+    _renderTocPiece(piece) {
+        const params = this.layoutParams;
+        const headingSizes = {
+            1: params.getHeadingFontSize(1),
+            2: params.getHeadingFontSize(2),
+            3: params.getHeadingFontSize(3)
+        };
+        const titleFontSizePt = headingSizes[1];
+
+        let html = `<div class="toc-title" style="font-size:${titleFontSizePt}pt;font-weight:700;text-align:center;margin-bottom:4mm;">${this._escapeHtml(piece.data.title || '目录')}</div>`;
+
+        if (this.documentProcessor) {
+            const entries = this.documentProcessor.getTocEntriesWithPageNumbers();
+            const entryFontSizePt = params.fontSizePt;
+
+            html += `<div class="toc-entries" style="font-size:${entryFontSizePt}pt;">`;
+
+            entries.forEach(entry => {
+                const indentLevel = entry.level - 1;
+                const indentMm = indentLevel * 6;
+                html += `<div class="toc-entry toc-level-${entry.level}" style="padding-left:${indentMm}mm;display:flex;align-items:baseline;">`;
+                html += `<a href="#heading-${entry.blockId}" class="toc-link" style="text-decoration:none;color:inherit;flex-shrink:0;">${this._escapeHtml(entry.displayText)}</a>`;
+                html += `<span class="toc-dot-leader" style="flex-grow:1;border-bottom:0.5pt dotted #6c757d;margin:0 2mm;min-width:5mm;"></span>`;
+                html += `<span class="toc-page" style="flex-shrink:0;text-align:right;">${entry.displayPage}</span>`;
+                html += `</div>`;
+            });
+
+            html += `</div>`;
+        }
+
+        return html;
+    }
+
+    _renderCrossRefPiece(piece) {
+        let displayText = '引用失效';
+        let invalid = true;
+        let targetId = null;
+
+        if (this.documentProcessor) {
+            const result = this.documentProcessor.formatCrossRef(piece.blockId);
+            displayText = result.text;
+            invalid = result.invalid;
+            targetId = result.targetId;
+        }
+
+        const params = this.layoutParams;
+        const fontSizePt = params.fontSizePt;
+
+        let html = '';
+        if (invalid) {
+            html = `<span class="cross-ref cross-ref-invalid" style="color:#d63031;font-weight:600;font-size:${fontSizePt}pt;">${this._escapeHtml(displayText)}</span>`;
+        } else {
+            let anchorId = '';
+            if (piece.data.targetType === window.Types.CrossRefTargetType.HEADING) {
+                anchorId = `heading-${targetId}`;
+            } else if (piece.data.targetType === window.Types.CrossRefTargetType.IMAGE) {
+                anchorId = `image-${targetId}`;
+            } else if (piece.data.targetType === window.Types.CrossRefTargetType.TABLE) {
+                anchorId = `table-${targetId}`;
+            }
+            if (anchorId) {
+                html = `<a href="#${anchorId}" class="cross-ref cross-ref-valid" style="color:#0984e3;text-decoration:none;font-size:${fontSizePt}pt;">${this._escapeHtml(displayText)}</a>`;
+            } else {
+                html = `<span class="cross-ref cross-ref-valid" style="color:#0984e3;font-size:${fontSizePt}pt;">${this._escapeHtml(displayText)}</span>`;
+            }
+        }
 
         return html;
     }

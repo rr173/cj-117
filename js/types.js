@@ -5,7 +5,9 @@ const BlockType = {
     PARAGRAPH: 'paragraph',
     IMAGE: 'image',
     TABLE: 'table',
-    FOOTNOTE_REF: 'footnote'
+    FOOTNOTE_REF: 'footnote',
+    TOC: 'toc',
+    CROSS_REF: 'crossref'
 };
 
 const BlockTypeLabels = {
@@ -15,7 +17,9 @@ const BlockTypeLabels = {
     [BlockType.PARAGRAPH]: '📄 正文段落',
     [BlockType.IMAGE]: '🖼️ 图片占位',
     [BlockType.TABLE]: '📊 表格',
-    [BlockType.FOOTNOTE_REF]: '📍 脚注引用'
+    [BlockType.FOOTNOTE_REF]: '📍 脚注引用',
+    [BlockType.TOC]: '📑 目录',
+    [BlockType.CROSS_REF]: '🔗 交叉引用'
 };
 
 const PaperPresets = {
@@ -65,10 +69,15 @@ class ContentBlock {
                     rows: [
                         ['数据1', '数据2', '数据3'],
                         ['数据4', '数据5', '数据6']
-                    ]
+                    ],
+                    caption: ''
                 };
             case BlockType.FOOTNOTE_REF:
                 return { refText: '', footnoteText: '' };
+            case BlockType.TOC:
+                return { title: '目录' };
+            case BlockType.CROSS_REF:
+                return { targetId: '', targetType: CrossRefTargetType.HEADING };
             default:
                 return {};
         }
@@ -89,6 +98,7 @@ class LayoutParams {
         this.fontFamily = '"Noto Serif SC", "Source Han Serif SC", "SimSun", serif';
         this.showHeader = true;
         this.showPageNumber = true;
+        this.autoNumberHeading = true;
     }
 
     get pageWidthPx() { return mmToPx(this.pageWidthMm); }
@@ -128,7 +138,8 @@ class LayoutParams {
 const InlineStyleType = {
     BOLD: 'bold',
     ITALIC: 'italic',
-    FOOTNOTE_REF: 'footnote_ref'
+    FOOTNOTE_REF: 'footnote_ref',
+    CROSS_REF: 'cross_ref'
 };
 
 class InlineStyle {
@@ -139,6 +150,12 @@ class InlineStyle {
         Object.assign(this, extra);
     }
 }
+
+const CrossRefTargetType = {
+    HEADING: 'heading',
+    IMAGE: 'image',
+    TABLE: 'table'
+};
 
 if (typeof window !== 'undefined') {
     window.Types = {
@@ -151,6 +168,7 @@ if (typeof window !== 'undefined') {
         ContentBlock,
         LayoutParams,
         InlineStyleType,
-        InlineStyle
+        InlineStyle,
+        CrossRefTargetType
     };
 }

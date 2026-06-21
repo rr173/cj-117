@@ -6,6 +6,8 @@ class PreviewRenderer {
         this.zoom = 1;
         this.selectedBlockId = null;
         this.docTitle = '未命名文档';
+        this.documentProcessor = null;
+        this.pageNumberOffset = 0;
     }
 
     setZoom(zoom) {
@@ -28,6 +30,14 @@ class PreviewRenderer {
 
     setDocTitle(title) {
         this.docTitle = title || '未命名文档';
+    }
+
+    setDocumentProcessor(dp) {
+        this.documentProcessor = dp;
+    }
+
+    setPageNumberOffset(offset) {
+        this.pageNumberOffset = offset;
     }
 
     render() {
@@ -127,7 +137,8 @@ class PreviewRenderer {
                 right: ${this.layoutParams.marginRightPx}px;
                 font-size: ${ptToPx(this.layoutParams.getFooterFontSize())}px;
             `;
-            footer.textContent = `— ${pageIndex + 1} —`;
+            const displayPageNum = pageIndex - this.pageNumberOffset + 1;
+            footer.textContent = `— ${displayPageNum} —`;
             content.appendChild(footer);
         }
 
@@ -164,6 +175,12 @@ class PreviewRenderer {
             case window.Types.BlockType.FOOTNOTE_REF:
                 this._renderFootnoteRef(el, piece);
                 break;
+            case window.Types.BlockType.TOC:
+                this._renderToc(el, piece);
+                break;
+            case window.Types.BlockType.CROSS_REF:
+                this._renderCrossRef(el, piece);
+                break;
         }
 
         return el;
@@ -185,19 +202,33 @@ class PreviewRenderer {
             marginTop = prevMargin;
         }
 
-        const lines = piece.data.lines || [];
-        let html = '';
-        lines.forEach((line, idx) => {
-            html += `<span class="rendered-line" style="height:${lineHeightPx}px;line-height:${lineHeightPx}px;">`;
-            html += this._renderLineWithStyles(line.segments || []);
-            html += '</span>';
-        });
-
-        if (html === '') {
-            html = this._escapeHtml(piece.data.text || '');
+        let displayText = piece.data.text || '';
+        if (this.documentProcessor) {
+            displayText = this.documentProcessor.getHeadingDisplay(piece.blockId) || displayText;
         }
 
-        el.innerHTML = html;
+        const lines = piece.data.lines || [];
+        let html = '';
+
+        if (lines.length > 0) {
+            lines.forEach((line, idx) => {
+                html += `<span class="rendered-line" style="height:${lineHeightPx}px;line-height:${lineHeightPx}px;">`;
+                if (idx === 0 && this.documentProcessor) {
+                    const headingInfo = this.documentProcessor.headingInfo.get(piece.blockId);
+                    if (headingInfo && this.layoutParams.autoNumberHeading && headingInfo.number) {
+                        html += `<span class="heading-number">${headingInfo.number} </span>`;
+                    }
+                }
+                html += this._renderLineWithStyles(line.segments || []);
+                html += '</span>';
+            });
+        }
+
+        if (html === '') {
+            html = this._escapeHtml(displayText);
+        }
+
+        el.innerHTML = `<a id="heading-${piece.blockId}" class="heading-anchor"></a>` + html;
         if (marginTop > 0) {
             el.style.paddingTop = marginTop + 'px';
             el.style.height = (piece.height + marginTop) + 'px';
@@ -272,8 +303,13 @@ class PreviewRenderer {
         const captionFontSize = this.layoutParams.fontSizePx * 0.85;
         const captionLineHeight = this.layoutParams.lineHeightPx * 0.85;
 
+        let displayCaption = piece.data.caption || '';
+        if (this.documentProcessor) {
+            displayCaption = this.documentProcessor.getImageCaption(piece.blockId) || displayCaption;
+        }
+
         const captionLines = window.LineBreaker.breakLinesMinRaggedness(
-            piece.data.caption || '',
+            displayCaption,
             contentWidth,
             captionFontSize,
             this.layoutParams.fontFamily
@@ -285,7 +321,7 @@ class PreviewRenderer {
         html += `<div style="font-size:${this.layoutParams.fontSizePx * 0.7}px;color:#adb5bd;margin-top:4px;">${piece.data.aspectRatio}</div>`;
         html += `</div>`;
 
-        if (piece.data.caption) {
+        if (displayCaption) {
             html += `<div class="rendered-image-caption" style="font-size:${captionFontSize}px;line-height:${captionLineHeight}px;margin-top:6px;text-align:center;color:#495057;">`;
             captionLines.forEach(line => {
                 html += `<span class="rendered-line" style="display:block;">${this._renderLineWithStyles(line.segments || [])}</span>`;
@@ -293,7 +329,7 @@ class PreviewRenderer {
             html += `</div>`;
         }
 
-        el.innerHTML = html;
+        el.innerHTML = `<a id="image-${piece.blockId}" class="heading-anchor"></a>` + html;
     }
 
     _getImageStyle() {
@@ -315,7 +351,31 @@ class PreviewRenderer {
         const lineHeightPx = fontSizePx * 1.3;
         const cellPaddingV = 8;
 
-        let html = `<table class="rendered-table" style="font-size:${fontSizePx}px;line-height:${lineHeightPx}px;">`;
+        let displayCaption = piece.data.caption || '';
+        if (this.documentProcessor) {
+            displayCaption = this.documentProcessor.getTableCaption(piece.blockId) || displayCaption;
+        }
+
+        let html = '';
+
+        if (displayCaption && !data.continuation) {
+            const captionFontSize = this.layoutParams.fontSizePx * 0.9;
+            const captionLineHeight = this.layoutParams.lineHeightPx * 0.9;
+            const captionLines = window.LineBreaker.breakLinesMinRaggedness(
+                displayCaption,
+                this.layoutParams.contentWidthPx,
+                captionFontSize,
+                this.layoutParams.fontFamily
+            );
+            html += `<div class="rendered-table-caption" style="font-size:${captionFontSize}px;line-height:${captionLineHeight}px;margin-bottom:6px;text-align:center;color:#495057;font-weight:600;">`;
+            captionLines.forEach(line => {
+                html += `<span class="rendered-line" style="display:block;">${this._renderLineWithStyles(line.segments || [])}</span>`;
+            });
+            html += `</div>`;
+        }
+
+        html += `<a id="table-${piece.blockId}" class="heading-anchor"></a>`;
+        html += `<table class="rendered-table" style="font-size:${fontSizePx}px;line-height:${lineHeightPx}px;">`;
 
         const showHeader = data.startRow === 0 || data.repeatedHeader;
         if (showHeader) {
@@ -344,6 +404,75 @@ class PreviewRenderer {
 
     _renderFootnoteRef(el, piece) {
         this._renderParagraph(el, piece);
+    }
+
+    _renderToc(el, piece) {
+        const titleFontSizePt = this.layoutParams.getHeadingFontSize(1);
+        const titleFontSizePx = ptToPx(titleFontSizePt);
+        const titleLineHeight = titleFontSizePx * Math.max(1.2, this.layoutParams.lineHeight - 0.2);
+
+        let html = `<div class="toc-title" style="font-size:${titleFontSizePx}px;line-height:${titleLineHeight}px;font-weight:700;text-align:center;margin-bottom:${this.layoutParams.paragraphSpacingPx}px;">${this._escapeHtml(piece.data.title || '目录')}</div>`;
+
+        if (this.documentProcessor) {
+            const entries = this.documentProcessor.getTocEntriesWithPageNumbers();
+            const entryFontSizePx = this.layoutParams.fontSizePx;
+            const entryLineHeight = this.layoutParams.lineHeightPx;
+
+            html += `<div class="toc-entries" style="font-size:${entryFontSizePx}px;line-height:${entryLineHeight}px;">`;
+
+            entries.forEach(entry => {
+                const indentLevel = entry.level - 1;
+                const indentPx = indentLevel * 24;
+                html += `<div class="toc-entry toc-level-${entry.level}" style="padding-left:${indentPx}px;display:flex;align-items:baseline;position:relative;">`;
+                html += `<a href="#heading-${entry.blockId}" class="toc-link" style="text-decoration:none;color:inherit;flex-shrink:0;">${this._escapeHtml(entry.displayText)}</a>`;
+                html += `<span class="toc-dot-leader" style="flex-grow:1;border-bottom:1px dotted #6c757d;margin:0 8px;min-width:20px;"></span>`;
+                html += `<span class="toc-page" style="flex-shrink:0;text-align:right;">${entry.displayPage}</span>`;
+                html += `</div>`;
+            });
+
+            html += `</div>`;
+        } else {
+            html += `<div style="color:#adb5bd;font-style:italic;">（目录自动生成区）</div>`;
+        }
+
+        el.innerHTML = html;
+    }
+
+    _renderCrossRef(el, piece) {
+        let displayText = '引用失效';
+        let invalid = true;
+        let targetId = null;
+
+        if (this.documentProcessor) {
+            const result = this.documentProcessor.formatCrossRef(piece.blockId);
+            displayText = result.text;
+            invalid = result.invalid;
+            targetId = result.targetId;
+        }
+
+        const fontSizePx = this.layoutParams.fontSizePx;
+        const lineHeightPx = this.layoutParams.lineHeightPx;
+
+        let html = '';
+        if (invalid) {
+            html = `<span class="cross-ref cross-ref-invalid" style="color:#d63031;font-weight:600;font-size:${fontSizePx}px;line-height:${lineHeightPx}px;">${this._escapeHtml(displayText)}</span>`;
+        } else {
+            let anchorId = '';
+            if (piece.data.targetType === window.Types.CrossRefTargetType.HEADING) {
+                anchorId = `heading-${targetId}`;
+            } else if (piece.data.targetType === window.Types.CrossRefTargetType.IMAGE) {
+                anchorId = `image-${targetId}`;
+            } else if (piece.data.targetType === window.Types.CrossRefTargetType.TABLE) {
+                anchorId = `table-${targetId}`;
+            }
+            if (anchorId) {
+                html = `<a href="#${anchorId}" class="cross-ref cross-ref-valid" style="color:#0984e3;text-decoration:none;font-size:${fontSizePx}px;line-height:${lineHeightPx}px;">${this._escapeHtml(displayText)}</a>`;
+            } else {
+                html = `<span class="cross-ref cross-ref-valid" style="color:#0984e3;font-size:${fontSizePx}px;line-height:${lineHeightPx}px;">${this._escapeHtml(displayText)}</span>`;
+            }
+        }
+
+        el.innerHTML = html;
     }
 
     _updateHighlight() {
