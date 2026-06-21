@@ -198,6 +198,28 @@
                             </label>
                         </div>
                     </div>
+
+                    <div class="param-group">
+                        <h3>多栏布局</h3>
+                        <div class="param-row">
+                            <label>栏数</label>
+                            <select id="column-count">
+                                <option value="1" selected>单栏</option>
+                                <option value="2">双栏</option>
+                                <option value="3">三栏</option>
+                            </select>
+                        </div>
+                        <div class="param-row">
+                            <label>栏间距 (mm)</label>
+                            <input type="number" id="column-gap" value="8" min="0" max="50" step="0.5">
+                        </div>
+                        <div class="param-row">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="show-column-rule">
+                                显示栏间分隔线
+                            </label>
+                        </div>
+                    </div>
                 </div>
             </aside>
         </div>

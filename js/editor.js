@@ -528,6 +528,7 @@ class ContentEditor {
     }
 
     _createImageEditor(block) {
+        const floatType = block.data.floatType || window.Types.ImageFloatType.NONE;
         return `
             <div class="form-group">
                 <label>宽高比</label>
@@ -548,6 +549,15 @@ class ContentEditor {
             <div class="form-group">
                 <label>占位提示文字</label>
                 <input type="text" id="edit-alt" value="${this._escapeHtml(block.data.altText)}" placeholder="显示在图片区域内的提示文字">
+            </div>
+            <div class="form-group">
+                <label>文字环绕</label>
+                <select id="edit-float">
+                    <option value="${window.Types.ImageFloatType.NONE}" ${floatType === window.Types.ImageFloatType.NONE ? 'selected' : ''}>不环绕（独占整行）</option>
+                    <option value="${window.Types.ImageFloatType.LEFT}" ${floatType === window.Types.ImageFloatType.LEFT ? 'selected' : ''}>左浮动（文字绕右）</option>
+                    <option value="${window.Types.ImageFloatType.RIGHT}" ${floatType === window.Types.ImageFloatType.RIGHT ? 'selected' : ''}>右浮动（文字绕左）</option>
+                </select>
+                <div class="form-hint">环绕图片不跨栏。若剩余空间小于栏宽30%，将自动放弃环绕。</div>
             </div>
         `;
     }
@@ -755,7 +765,8 @@ class ContentEditor {
                 const aspectRatio = document.getElementById('edit-ratio').value;
                 const caption = document.getElementById('edit-caption').value;
                 const altText = document.getElementById('edit-alt').value;
-                this.updateBlock(block.id, { aspectRatio, caption, altText });
+                const floatType = document.getElementById('edit-float').value || window.Types.ImageFloatType.NONE;
+                this.updateBlock(block.id, { aspectRatio, caption, altText, floatType });
                 break;
             }
 

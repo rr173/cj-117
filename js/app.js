@@ -240,6 +240,24 @@ class Application {
             this._debounceUpdate();
         });
 
+        document.getElementById('column-count').addEventListener('change', (e) => {
+            this.layoutParams.columnCount = parseInt(e.target.value) || 1;
+            this._debounceUpdate();
+        });
+
+        document.getElementById('column-gap').addEventListener('input', (e) => {
+            const value = parseFloat(e.target.value);
+            if (!isNaN(value)) {
+                this.layoutParams.columnGapMm = value;
+                this._debounceUpdate();
+            }
+        });
+
+        document.getElementById('show-column-rule').addEventListener('change', (e) => {
+            this.layoutParams.showColumnRule = e.target.checked;
+            this._debounceUpdate();
+        });
+
         document.getElementById('paper-preset').addEventListener('change', (e) => {
             const preset = e.target.value;
             if (preset !== 'custom' && window.Types.PaperPresets[preset]) {

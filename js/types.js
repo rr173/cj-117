@@ -61,7 +61,7 @@ class ContentBlock {
             case BlockType.PARAGRAPH:
                 return { text: '', inlineStyles: [] };
             case BlockType.IMAGE:
-                return { aspectRatio: '4:3', caption: '图片标题', altText: '图片占位' };
+                return { aspectRatio: '4:3', caption: '图片标题', altText: '图片占位', floatType: ImageFloatType.NONE };
             case BlockType.TABLE:
                 return {
                     columns: 3,
@@ -99,6 +99,9 @@ class LayoutParams {
         this.showHeader = true;
         this.showPageNumber = true;
         this.autoNumberHeading = true;
+        this.columnCount = 1;
+        this.columnGapMm = 8;
+        this.showColumnRule = false;
     }
 
     get pageWidthPx() { return mmToPx(this.pageWidthMm); }
@@ -115,6 +118,20 @@ class LayoutParams {
     }
     get contentHeightPx() {
         return this.pageHeightPx - this.marginTopPx - this.marginBottomPx;
+    }
+
+    get columnGapPx() { return mmToPx(this.columnGapMm); }
+
+    get columnWidthPx() {
+        const gapCount = Math.max(0, this.columnCount - 1);
+        const totalGap = gapCount * this.columnGapPx;
+        const availableWidth = this.contentWidthPx - totalGap;
+        return Math.max(0, availableWidth / this.columnCount);
+    }
+
+    getColumnLeftPx(columnIndex) {
+        if (columnIndex < 0 || columnIndex >= this.columnCount) return 0;
+        return columnIndex * (this.columnWidthPx + this.columnGapPx);
     }
 
     getHeaderFontSize() {
@@ -157,6 +174,12 @@ const CrossRefTargetType = {
     TABLE: 'table'
 };
 
+const ImageFloatType = {
+    NONE: 'none',
+    LEFT: 'left',
+    RIGHT: 'right'
+};
+
 if (typeof window !== 'undefined') {
     window.Types = {
         BlockType,
@@ -169,6 +192,7 @@ if (typeof window !== 'undefined') {
         LayoutParams,
         InlineStyleType,
         InlineStyle,
-        CrossRefTargetType
+        CrossRefTargetType,
+        ImageFloatType
     };
 }

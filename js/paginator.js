@@ -5,8 +5,98 @@ class RenderedBlockPiece {
         this.data = data;
         this.pageIndex = -1;
         this.top = 0;
+        this.left = 0;
         this.height = 0;
         this.width = 0;
+        this.columnIndex = 0;
+        this.spanColumns = 1;
+        this.isSpanning = false;
+    }
+}
+
+class FloatingImage {
+    constructor(piece, top, columnWidth) {
+        this.piece = piece;
+        this.top = top;
+        this.bottom = top + piece.height;
+        this.width = piece.width;
+        this.floatType = piece.data.floatType;
+        this.columnWidth = columnWidth;
+    }
+
+    getLineWidth(currentTop) {
+        if (currentTop < this.top || currentTop >= this.bottom) {
+            return this.columnWidth;
+        }
+        if (this.floatType === window.Types.ImageFloatType.LEFT) {
+            return this.columnWidth - this.width - 8;
+        } else if (this.floatType === window.Types.ImageFloatType.RIGHT) {
+            return this.columnWidth - this.width - 8;
+        }
+        return this.columnWidth;
+    }
+
+    getLeftOffset(currentTop) {
+        if (currentTop < this.top || currentTop >= this.bottom) {
+            return 0;
+        }
+        if (this.floatType === window.Types.ImageFloatType.LEFT) {
+            return this.width + 8;
+        }
+        return 0;
+    }
+
+    isActive(currentTop) {
+        return currentTop >= this.top && currentTop < this.bottom;
+    }
+}
+
+class ColumnState {
+    constructor(index, layoutParams) {
+        this.index = index;
+        this.layoutParams = layoutParams;
+        this.currentTop = 0;
+        this.floatingImages = [];
+    }
+
+    get width() {
+        return this.layoutParams.columnWidthPx;
+    }
+
+    getAvailableWidth(currentTop) {
+        let availableWidth = this.width;
+        for (const img of this.floatingImages) {
+            if (img.isActive(currentTop)) {
+                availableWidth = Math.min(availableWidth, img.getLineWidth(currentTop));
+            }
+        }
+        return Math.max(0, availableWidth);
+    }
+
+    getLeftOffset(currentTop) {
+        let offset = 0;
+        for (const img of this.floatingImages) {
+            if (img.isActive(currentTop)) {
+                offset = Math.max(offset, img.getLeftOffset(currentTop));
+            }
+        }
+        return offset;
+    }
+
+    cleanupFloatingImages(currentTop) {
+        this.floatingImages = this.floatingImages.filter(img => currentTop < img.bottom);
+    }
+
+    addFloatingImage(img) {
+        this.floatingImages.push(img);
+    }
+
+    hasActiveFloating(currentTop) {
+        return this.floatingImages.some(img => img.isActive(currentTop));
+    }
+
+    getActiveFloatings(currentTop) {
+        return this.floatingImages.filter(img => img.isActive(currentTop));
     }
 }
 
@@ -17,6 +107,11 @@ class Page {
         this.pieces = [];
         this.footnotes = [];
         this.footnoteAreaHeight = 0;
+        this.columns = [];
+        for (let i = 0; i < layoutParams.columnCount; i++) {
+            this.columns.push(new ColumnState(i, layoutParams));
+        }
+        this.currentColumnIndex = 0;
     }
 
     get availableTop() {
@@ -36,14 +131,59 @@ class Page {
         return bottom;
     }
 
-    getRemainingHeight(currentTop) {
-        return Math.max(0, this.availableBottom - currentTop);
+    getColumnRemainingHeight(columnIndex) {
+        const col = this.columns[columnIndex];
+        return Math.max(0, this.availableBottom - col.currentTop);
     }
 
-    addPiece(piece, top) {
+    getCurrentColumn() {
+        return this.columns[this.currentColumnIndex];
+    }
+
+    advanceColumn() {
+        this.currentColumnIndex++;
+        if (this.currentColumnIndex >= this.layoutParams.columnCount) {
+            return false;
+        }
+        return true;
+    }
+
+    hasMoreColumns() {
+        return this.currentColumnIndex < this.layoutParams.columnCount - 1;
+    }
+
+    getRemainingHeight(currentColumnIndex = null) {
+        const idx = currentColumnIndex != null ? currentColumnIndex : this.currentColumnIndex;
+        return this.getColumnRemainingHeight(idx);
+    }
+
+    addPiece(piece, top, columnIndex = null, left = 0) {
         piece.pageIndex = this.index;
         piece.top = top;
+        piece.left = left;
+        piece.columnIndex = columnIndex != null ? columnIndex : this.currentColumnIndex;
         this.pieces.push(piece);
+        if (columnIndex == null) {
+            columnIndex = this.currentColumnIndex;
+        }
+        if (!piece.isSpanning && !(piece.data && piece.data.isFloating)) {
+            this.columns[columnIndex].currentTop = Math.max(this.columns[columnIndex].currentTop, top + piece.height);
+        }
+    }
+
+    addSpanningPiece(piece, top) {
+        piece.pageIndex = this.index;
+        piece.top = top;
+        piece.left = 0;
+        piece.columnIndex = 0;
+        piece.spanColumns = this.layoutParams.columnCount;
+        piece.isSpanning = true;
+        this.pieces.push(piece);
+
+        for (let i = 0; i < this.layoutParams.columnCount; i++) {
+            this.columns[i].currentTop = Math.max(this.columns[i].currentTop, top + piece.height);
+        }
+        this.currentColumnIndex = 0;
     }
 }
 
@@ -69,6 +209,63 @@ class PaginationEngine {
         this.documentProcessor = dp;
     }
 
+    getEffectiveWidth(block) {
+        if (this.layoutParams.columnCount === 1) {
+            return this.layoutParams.contentWidthPx;
+        }
+        if (this._shouldSpanAllColumns(block)) {
+            return this.layoutParams.contentWidthPx;
+        }
+        return this.layoutParams.columnWidthPx;
+    }
+
+    _shouldSpanAllColumns(block) {
+        if (this.layoutParams.columnCount === 1) return false;
+
+        if (block.type === window.Types.BlockType.H1) {
+            return true;
+        }
+
+        if (block.type === window.Types.BlockType.IMAGE) {
+            const [w, h] = block.data.aspectRatio.split(':').map(Number);
+            const ratio = h / w;
+            const columnWidth = this.layoutParams.columnWidthPx;
+            const fullWidth = this.layoutParams.contentWidthPx;
+            const imgWidthSingle = columnWidth * 0.5;
+            const imgWidthIfSingle = imgWidthSingle;
+            const contentWidthForSingle = columnWidth;
+            const thresholdWidth = contentWidthForSingle * 0.8;
+            const floatType = block.data.floatType || window.Types.ImageFloatType.NONE;
+            if (floatType !== window.Types.ImageFloatType.NONE) {
+                return false;
+            }
+            const imgWidthAtSingle = contentWidthForSingle * ratio;
+            const imgWidthIfFull = fullWidth * ratio;
+            const estimatedImgWidth = columnWidth;
+            return estimatedImgWidth > thresholdWidth;
+        }
+
+        if (block.type === window.Types.BlockType.TOC) {
+            return true;
+        }
+
+        return false;
+    }
+
+    _calculateImageWidth(block, forSpanningCheck = false) {
+        if (forSpanningCheck) {
+            return this.layoutParams.columnWidthPx;
+        }
+        const floatType = block.data.floatType || window.Types.ImageFloatType.NONE;
+        if (floatType !== window.Types.ImageFloatType.NONE && this.layoutParams.columnCount > 1) {
+            return this.layoutParams.columnWidthPx * 0.5;
+        }
+        if (this._shouldSpanAllColumns(block)) {
+            return this.layoutParams.contentWidthPx;
+        }
+        return this.layoutParams.columnWidthPx;
+    }
+
     getHeadingHeight(level) {
         const fontSizePt = this.layoutParams.getHeadingFontSize(level);
         const fontSizePx = ptToPx(fontSizePt);
@@ -76,47 +273,46 @@ class PaginationEngine {
         return lineHeightPx;
     }
 
-    getHeadingLines(text, level) {
+    getHeadingLines(text, level, column) {
         const fontSizePt = this.layoutParams.getHeadingFontSize(level);
         const fontSizePx = ptToPx(fontSizePt);
+        const width = column && !this.layoutParams.columnCount === 1 ? column.getAvailableWidth(column.currentTop) : this.getEffectiveWidth({ type: `h${level}` });
         return window.LineBreaker.breakLinesMinRaggedness(
             text,
-            this.layoutParams.contentWidthPx,
+            width,
             fontSizePx,
             this.layoutParams.fontFamily,
             []
         );
     }
 
-    getParagraphHeight(text, inlineStyles) {
-        const lines = window.LineBreaker.breakLinesMinRaggedness(
-            text,
-            this.layoutParams.contentWidthPx,
-            this.layoutParams.fontSizePx,
-            this.layoutParams.fontFamily,
-            inlineStyles
-        );
+    getParagraphHeight(text, inlineStyles, column) {
+        const lines = this.getParagraphLines(text, inlineStyles, column);
         return lines.length * this.layoutParams.lineHeightPx;
     }
 
-    getParagraphLines(text, inlineStyles) {
+    getParagraphLines(text, inlineStyles, column, startTop = 0) {
+        const columnWidth = column ? column.width : this.layoutParams.columnWidthPx;
+        const availableWidth = column ? column.getAvailableWidth(column.currentTop + startTop) : columnWidth;
         return window.LineBreaker.breakLinesMinRaggedness(
             text,
-            this.layoutParams.contentWidthPx,
+            availableWidth,
             this.layoutParams.fontSizePx,
             this.layoutParams.fontFamily,
             inlineStyles
         );
     }
 
-    getImageHeight(block) {
+    getImageHeight(block, width = null) {
         const [w, h] = block.data.aspectRatio.split(':').map(Number);
         const ratio = h / w;
-        const contentWidth = this.layoutParams.contentWidthPx;
-        const imgHeight = contentWidth * ratio;
+        const imgWidth = width || this._calculateImageWidth(block);
+        const imgHeight = imgWidth * ratio;
+
+        const captionWidth = width || this._calculateImageWidth(block);
         const captionLines = window.LineBreaker.breakLinesMinRaggedness(
             block.data.caption || '',
-            contentWidth,
+            captionWidth,
             this.layoutParams.fontSizePx * 0.85,
             this.layoutParams.fontFamily
         );
@@ -124,7 +320,8 @@ class PaginationEngine {
         return imgHeight + captionHeight + 4;
     }
 
-    getTableHeight(block, startRow = 0, maxHeight = Infinity) {
+    getTableHeight(block, startRow = 0, maxHeight = Infinity, width = null) {
+        const tableWidth = width || this.layoutParams.contentWidthPx;
         const fontSizePx = this.layoutParams.fontSizePx * 0.9;
         const lineHeightPx = fontSizePx * 1.3;
         const cellPaddingV = 8;
@@ -132,7 +329,7 @@ class PaginationEngine {
 
         const headers = block.data.headers;
         const rows = block.data.rows;
-        const colWidth = this.layoutParams.contentWidthPx / block.data.columns;
+        const colWidth = tableWidth / block.data.columns;
 
         let totalHeight = 0;
         let usedRows = 0;
@@ -142,7 +339,7 @@ class PaginationEngine {
             const captionLineHeight = this.layoutParams.lineHeightPx * 0.9;
             const captionLines = window.LineBreaker.breakLinesMinRaggedness(
                 block.data.caption,
-                this.layoutParams.contentWidthPx,
+                tableWidth,
                 captionFontSize,
                 this.layoutParams.fontFamily
             );
@@ -255,19 +452,88 @@ class PaginationEngine {
         return splitAt;
     }
 
-    findBlocksForPage(startBlockIndex, startOffset, page) {
+    _checkFloatingImageSpace(block, column, availableHeight) {
+        const floatType = block.data.floatType || window.Types.ImageFloatType.NONE;
+        if (floatType === window.Types.ImageFloatType.NONE) {
+            return { canFloat: false };
+        }
+
+        const halfColumnWidth = this.layoutParams.columnWidthPx * 0.5;
+        const remainingWidth = this.layoutParams.columnWidthPx - halfColumnWidth - 8;
+        const minTextWidth = this.layoutParams.columnWidthPx * 0.3;
+
+        if (remainingWidth < minTextWidth) {
+            return { canFloat: false };
+        }
+
+        const imgHeight = this.getImageHeight(block, halfColumnWidth);
+        if (imgHeight > availableHeight) {
+            return { canFloat: false };
+        }
+
+        return { canFloat: true, imgWidth: halfColumnWidth, imgHeight };
+    }
+
+    _layoutBlockWithFloating(block, page, column) {
+        const floatType = block.data.floatType || window.Types.ImageFloatType.NONE;
+        if (floatType === window.Types.ImageFloatType.NONE) {
+            return null;
+        }
+
+        const availableHeight = page.getColumnRemainingHeight(column.index);
+        const check = this._checkFloatingImageSpace(block, column, availableHeight);
+
+        if (!check.canFloat) {
+            return null;
+        }
+
+        const piece = new RenderedBlockPiece(block.id, block.type, {
+            aspectRatio: block.data.aspectRatio,
+            caption: block.data.caption,
+            altText: block.data.altText,
+            floatType: floatType
+        });
+        piece.height = check.imgHeight;
+        piece.width = check.imgWidth;
+        piece.isFloating = true;
+        piece.data.isFloating = true;
+        piece.data.renderedWidth = check.imgWidth;
+
+        const leftInColumn = floatType === window.Types.ImageFloatType.LEFT ? 0 : (column.width - check.imgWidth);
+        const absoluteLeft = this.layoutParams.getColumnLeftPx(column.index) + leftInColumn;
+
+        page.addPiece(piece, column.currentTop, column.index, absoluteLeft);
+
+        const floating = new FloatingImage(piece, column.currentTop, column.width);
+        column.addFloatingImage(floating);
+
+        return { piece, consumed: false };
+    }
+
+    findBlocksForColumn(startBlockIndex, startOffset, page, columnIndex) {
         const pieces = [];
-        let currentTop = startOffset;
         let currentBlockIndex = startBlockIndex;
         const pageFootnotes = [];
+        const column = page.columns[columnIndex];
 
         while (currentBlockIndex < this.blocks.length) {
             const block = this.blocks[currentBlockIndex];
             const blockType = block.type;
-            const remainingHeight = page.getRemainingHeight(currentTop);
 
+            const remainingHeight = page.getColumnRemainingHeight(columnIndex);
             if (remainingHeight < this.layoutParams.lineHeightPx) {
                 break;
+            }
+
+            const shouldSpan = this._shouldSpanAllColumns(block);
+
+            if (shouldSpan && columnIndex !== 0) {
+                break;
+            }
+
+            if (shouldSpan && column.hasActiveFloating(column.currentTop)) {
+                column.currentTop = Math.max(column.currentTop, ...column.floatingImages.map(f => f.bottom));
+                column.cleanupFloatingImages(column.currentTop);
             }
 
             switch (blockType) {
@@ -275,22 +541,48 @@ class PaginationEngine {
                 case window.Types.BlockType.H2:
                 case window.Types.BlockType.H3: {
                     const level = parseInt(blockType.substring(1));
-                    const headingLines = this.getHeadingLines(block.data.text || '标题', level);
+                    const useWidth = shouldSpan ? this.layoutParams.contentWidthPx : column.getAvailableWidth(column.currentTop);
+                    const fontSizePt = this.layoutParams.getHeadingFontSize(level);
+                    const fontSizePx = ptToPx(fontSizePt);
+                    const headingLines = window.LineBreaker.breakLinesMinRaggedness(
+                        block.data.text || '标题',
+                        useWidth,
+                        fontSizePx,
+                        this.layoutParams.fontFamily,
+                        []
+                    );
                     const headingHeight = headingLines.length * this.getHeadingHeight(level);
 
-                    if (currentTop + headingHeight <= page.availableBottom) {
+                    if (column.currentTop + headingHeight <= page.availableBottom) {
                         const piece = new RenderedBlockPiece(block.id, blockType, {
                             lines: headingLines,
                             level,
                             text: block.data.text
                         });
                         piece.height = headingHeight;
-                        piece.width = this.layoutParams.contentWidthPx;
-                        pieces.push({ piece, top: currentTop });
-                        currentTop += headingHeight;
+                        piece.width = useWidth;
+
+                        if (shouldSpan) {
+                            for (let i = 0; i < page.columns.length; i++) {
+                                const otherCol = page.columns[i];
+                                if (otherCol.currentTop > column.currentTop) {
+                                    column.currentTop = otherCol.currentTop;
+                                }
+                            }
+                            pieces.push({ piece, top: column.currentTop, spanning: true });
+                            column.currentTop += headingHeight;
+                            for (let i = 0; i < page.columns.length; i++) {
+                                page.columns[i].currentTop = column.currentTop;
+                            }
+                        } else {
+                            const leftOffset = column.getLeftOffset(column.currentTop);
+                            const absLeft = this.layoutParams.getColumnLeftPx(columnIndex) + leftOffset;
+                            pieces.push({ piece, top: column.currentTop, left: absLeft, column: columnIndex });
+                            column.currentTop += headingHeight;
+                        }
                         currentBlockIndex++;
                     } else {
-                        if (currentTop === startOffset) {
+                        if (column.currentTop === page.availableTop && pieces.length === 0) {
                             const availableLines = Math.floor(remainingHeight / this.getHeadingHeight(level));
                             if (availableLines > 0) {
                                 const splitLines = headingLines.slice(0, availableLines);
@@ -302,9 +594,19 @@ class PaginationEngine {
                                     nextLine: availableLines
                                 });
                                 piece.height = availableLines * this.getHeadingHeight(level);
-                                piece.width = this.layoutParams.contentWidthPx;
-                                pieces.push({ piece, top: currentTop });
-                                currentTop += piece.height;
+                                piece.width = useWidth;
+                                if (shouldSpan) {
+                                    pieces.push({ piece, top: column.currentTop, spanning: true });
+                                    column.currentTop += piece.height;
+                                    for (let i = 0; i < page.columns.length; i++) {
+                                        page.columns[i].currentTop = column.currentTop;
+                                    }
+                                } else {
+                                    const leftOffset = column.getLeftOffset(column.currentTop);
+                                    const absLeft = this.layoutParams.getColumnLeftPx(columnIndex) + leftOffset;
+                                    pieces.push({ piece, top: column.currentTop, left: absLeft, column: columnIndex });
+                                    column.currentTop += piece.height;
+                                }
                                 return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: availableLines, footnotes: pageFootnotes };
                             }
                         }
@@ -320,7 +622,14 @@ class PaginationEngine {
                          prevBlock.type === window.Types.BlockType.H2 ||
                          prevBlock.type === window.Types.BlockType.H3);
 
-                    const lines = this.getParagraphLines(block.data.text, block.data.inlineStyles || []);
+                    const useWidth = column.getAvailableWidth(column.currentTop);
+                    const lines = window.LineBreaker.breakLinesMinRaggedness(
+                        block.data.text,
+                        useWidth,
+                        this.layoutParams.fontSizePx,
+                        this.layoutParams.fontFamily,
+                        block.data.inlineStyles || []
+                    );
                     const totalHeight = lines.length * this.layoutParams.lineHeightPx;
 
                     const footnoteRefs = (block.data.inlineStyles || []).filter(
@@ -339,7 +648,7 @@ class PaginationEngine {
                         ref.footnoteNumber = this.footnoteMap[ref.footnoteId];
                     }
 
-                    if (currentTop + totalHeight <= page.availableBottom) {
+                    if (column.currentTop + totalHeight <= page.availableBottom) {
                         if (isAfterHeading && lines.length < 2 && pieces.length > 0) {
                             return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: 0, footnotes: pageFootnotes };
                         }
@@ -349,9 +658,12 @@ class PaginationEngine {
                             inlineStyles: block.data.inlineStyles || []
                         });
                         piece.height = totalHeight;
-                        piece.width = this.layoutParams.contentWidthPx;
-                        pieces.push({ piece, top: currentTop });
-                        currentTop += totalHeight + this.layoutParams.paragraphSpacingPx;
+                        piece.width = useWidth;
+                        const leftOffset = column.getLeftOffset(column.currentTop);
+                        const absLeft = this.layoutParams.getColumnLeftPx(columnIndex) + leftOffset;
+                        pieces.push({ piece, top: column.currentTop, left: absLeft, column: columnIndex });
+                        column.currentTop += totalHeight + this.layoutParams.paragraphSpacingPx;
+                        column.cleanupFloatingImages(column.currentTop);
                         currentBlockIndex++;
                     } else {
                         const availableLines = Math.floor(remainingHeight / this.layoutParams.lineHeightPx);
@@ -382,39 +694,87 @@ class PaginationEngine {
                             nextLine: splitAt
                         });
                         piece.height = thisPageLines.length * this.layoutParams.lineHeightPx;
-                        piece.width = this.layoutParams.contentWidthPx;
-                        pieces.push({ piece, top: currentTop });
-                        currentTop += piece.height;
+                        piece.width = useWidth;
+                        const leftOffset = column.getLeftOffset(column.currentTop);
+                        const absLeft = this.layoutParams.getColumnLeftPx(columnIndex) + leftOffset;
+                        pieces.push({ piece, top: column.currentTop, left: absLeft, column: columnIndex });
+                        column.currentTop += piece.height;
+                        column.cleanupFloatingImages(column.currentTop);
                         return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: splitAt, footnotes: pageFootnotes };
                     }
                     break;
                 }
 
                 case window.Types.BlockType.IMAGE: {
-                    const imgHeight = this.getImageHeight(block);
+                    const floatType = block.data.floatType || window.Types.ImageFloatType.NONE;
 
-                    if (currentTop + imgHeight <= page.availableBottom) {
+                    if (floatType !== window.Types.ImageFloatType.NONE && !shouldSpan) {
+                        const floatResult = this._layoutBlockWithFloating(block, page, column);
+                        if (floatResult) {
+                            const p = floatResult.piece;
+                            pieces.push({
+                                piece: p,
+                                top: p.top,
+                                left: p.left,
+                                column: columnIndex,
+                                floating: true
+                            });
+                            currentBlockIndex++;
+                            continue;
+                        }
+                    }
+
+                    const useWidth = shouldSpan ? this.layoutParams.contentWidthPx : column.width;
+                    const imgHeight = this.getImageHeight(block, useWidth);
+
+                    if (column.currentTop + imgHeight <= page.availableBottom) {
                         const piece = new RenderedBlockPiece(block.id, blockType, {
                             aspectRatio: block.data.aspectRatio,
                             caption: block.data.caption,
-                            altText: block.data.altText
+                            altText: block.data.altText,
+                            renderedWidth: useWidth
                         });
                         piece.height = imgHeight;
-                        piece.width = this.layoutParams.contentWidthPx;
-                        pieces.push({ piece, top: currentTop });
-                        currentTop += imgHeight + this.layoutParams.paragraphSpacingPx;
+                        piece.width = useWidth;
+                        if (shouldSpan) {
+                            for (let i = 0; i < page.columns.length; i++) {
+                                const otherCol = page.columns[i];
+                                if (otherCol.currentTop > column.currentTop) {
+                                    column.currentTop = otherCol.currentTop;
+                                }
+                            }
+                            pieces.push({ piece, top: column.currentTop, spanning: true });
+                            column.currentTop += imgHeight + this.layoutParams.paragraphSpacingPx;
+                            for (let i = 0; i < page.columns.length; i++) {
+                                page.columns[i].currentTop = column.currentTop;
+                            }
+                        } else {
+                            const absLeft = this.layoutParams.getColumnLeftPx(columnIndex);
+                            pieces.push({ piece, top: column.currentTop, left: absLeft, column: columnIndex });
+                            column.currentTop += imgHeight + this.layoutParams.paragraphSpacingPx;
+                        }
                         currentBlockIndex++;
                     } else {
-                        if (currentTop === startOffset && pieces.length === 0) {
+                        if (column.currentTop === page.availableTop && pieces.length === 0) {
                             const piece = new RenderedBlockPiece(block.id, blockType, {
                                 aspectRatio: block.data.aspectRatio,
                                 caption: block.data.caption,
-                                altText: block.data.altText
+                                altText: block.data.altText,
+                                renderedWidth: useWidth
                             });
                             piece.height = imgHeight;
-                            piece.width = this.layoutParams.contentWidthPx;
-                            pieces.push({ piece, top: currentTop });
-                            currentTop += imgHeight;
+                            piece.width = useWidth;
+                            if (shouldSpan) {
+                                pieces.push({ piece, top: column.currentTop, spanning: true });
+                                column.currentTop += imgHeight;
+                                for (let i = 0; i < page.columns.length; i++) {
+                                    page.columns[i].currentTop = column.currentTop;
+                                }
+                            } else {
+                                const absLeft = this.layoutParams.getColumnLeftPx(columnIndex);
+                                pieces.push({ piece, top: column.currentTop, left: absLeft, column: columnIndex });
+                                column.currentTop += imgHeight;
+                            }
                             currentBlockIndex++;
                         } else {
                             return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: 0, footnotes: pageFootnotes };
@@ -424,7 +784,8 @@ class PaginationEngine {
                 }
 
                 case window.Types.BlockType.TABLE: {
-                    const tableInfo = this.getTableHeight(block, 0, remainingHeight);
+                    const useWidth = shouldSpan ? this.layoutParams.contentWidthPx : column.width;
+                    const tableInfo = this.getTableHeight(block, 0, remainingHeight, useWidth);
                     const halfPage = this.layoutParams.contentHeightPx / 2;
 
                     if (tableInfo.height <= remainingHeight) {
@@ -435,15 +796,31 @@ class PaginationEngine {
                             caption: block.data.caption || '',
                             startRow: 0,
                             rowCount: block.data.rows.length,
-                            repeatedHeader: false
+                            repeatedHeader: false,
+                            renderedWidth: useWidth
                         });
                         piece.height = tableInfo.height;
-                        piece.width = this.layoutParams.contentWidthPx;
-                        pieces.push({ piece, top: currentTop });
-                        currentTop += tableInfo.height + this.layoutParams.paragraphSpacingPx;
+                        piece.width = useWidth;
+                        if (shouldSpan) {
+                            for (let i = 0; i < page.columns.length; i++) {
+                                const otherCol = page.columns[i];
+                                if (otherCol.currentTop > column.currentTop) {
+                                    column.currentTop = otherCol.currentTop;
+                                }
+                            }
+                            pieces.push({ piece, top: column.currentTop, spanning: true });
+                            column.currentTop += tableInfo.height + this.layoutParams.paragraphSpacingPx;
+                            for (let i = 0; i < page.columns.length; i++) {
+                                page.columns[i].currentTop = column.currentTop;
+                            }
+                        } else {
+                            const absLeft = this.layoutParams.getColumnLeftPx(columnIndex);
+                            pieces.push({ piece, top: column.currentTop, left: absLeft, column: columnIndex });
+                            column.currentTop += tableInfo.height + this.layoutParams.paragraphSpacingPx;
+                        }
                         currentBlockIndex++;
                     } else if (tableInfo.height > halfPage) {
-                        const partialInfo = this.getTableHeight(block, 0, remainingHeight);
+                        const partialInfo = this.getTableHeight(block, 0, remainingHeight, useWidth);
                         if (partialInfo.rowsRendered > 1) {
                             const piece = new RenderedBlockPiece(block.id, blockType, {
                                 headers: block.data.headers,
@@ -454,12 +831,22 @@ class PaginationEngine {
                                 rowCount: partialInfo.rowsRendered,
                                 partial: true,
                                 nextRow: partialInfo.nextRow,
-                                repeatedHeader: false
+                                repeatedHeader: false,
+                                renderedWidth: useWidth
                             });
                             piece.height = partialInfo.height;
-                            piece.width = this.layoutParams.contentWidthPx;
-                            pieces.push({ piece, top: currentTop });
-                            currentTop += partialInfo.height;
+                            piece.width = useWidth;
+                            if (shouldSpan) {
+                                pieces.push({ piece, top: column.currentTop, spanning: true });
+                                column.currentTop += partialInfo.height;
+                                for (let i = 0; i < page.columns.length; i++) {
+                                    page.columns[i].currentTop = column.currentTop;
+                                }
+                            } else {
+                                const absLeft = this.layoutParams.getColumnLeftPx(columnIndex);
+                                pieces.push({ piece, top: column.currentTop, left: absLeft, column: columnIndex });
+                                column.currentTop += partialInfo.height;
+                            }
                             return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: partialInfo.nextRow, footnotes: pageFootnotes };
                         } else {
                             return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: 0, footnotes: pageFootnotes };
@@ -487,10 +874,17 @@ class PaginationEngine {
                         fullText.length,
                         { footnoteNumber: footnoteNum }
                     );
-                    const lines = this.getParagraphLines(fullText, [fnStyle]);
+                    const useWidth = column.getAvailableWidth(column.currentTop);
+                    const lines = window.LineBreaker.breakLinesMinRaggedness(
+                        fullText,
+                        useWidth,
+                        this.layoutParams.fontSizePx,
+                        this.layoutParams.fontFamily,
+                        [fnStyle]
+                    );
 
                     const height = lines.length * this.layoutParams.lineHeightPx;
-                    if (currentTop + height <= page.availableBottom) {
+                    if (column.currentTop + height <= page.availableBottom) {
                         const piece = new RenderedBlockPiece(block.id, blockType, {
                             lines: lines,
                             text: fullText,
@@ -498,9 +892,12 @@ class PaginationEngine {
                             footnoteNumber: footnoteNum
                         });
                         piece.height = height;
-                        piece.width = this.layoutParams.contentWidthPx;
-                        pieces.push({ piece, top: currentTop });
-                        currentTop += height + this.layoutParams.paragraphSpacingPx;
+                        piece.width = useWidth;
+                        const leftOffset = column.getLeftOffset(column.currentTop);
+                        const absLeft = this.layoutParams.getColumnLeftPx(columnIndex) + leftOffset;
+                        pieces.push({ piece, top: column.currentTop, left: absLeft, column: columnIndex });
+                        column.currentTop += height + this.layoutParams.paragraphSpacingPx;
+                        column.cleanupFloatingImages(column.currentTop);
                         currentBlockIndex++;
                     } else {
                         return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: 0, footnotes: pageFootnotes };
@@ -510,24 +907,36 @@ class PaginationEngine {
 
                 case window.Types.BlockType.TOC: {
                     const tocHeight = this.getTocHeight(block);
-                    if (currentTop + tocHeight <= page.availableBottom) {
+                    if (column.currentTop + tocHeight <= page.availableBottom) {
                         const piece = new RenderedBlockPiece(block.id, blockType, {
                             title: block.data.title || '目录'
                         });
                         piece.height = tocHeight;
                         piece.width = this.layoutParams.contentWidthPx;
-                        pieces.push({ piece, top: currentTop });
-                        currentTop += tocHeight + this.layoutParams.paragraphSpacingPx;
+                        for (let i = 0; i < page.columns.length; i++) {
+                            const otherCol = page.columns[i];
+                            if (otherCol.currentTop > column.currentTop) {
+                                column.currentTop = otherCol.currentTop;
+                            }
+                        }
+                        pieces.push({ piece, top: column.currentTop, spanning: true });
+                        column.currentTop += tocHeight + this.layoutParams.paragraphSpacingPx;
+                        for (let i = 0; i < page.columns.length; i++) {
+                            page.columns[i].currentTop = column.currentTop;
+                        }
                         currentBlockIndex++;
                     } else {
-                        if (currentTop === startOffset && pieces.length === 0) {
+                        if (column.currentTop === page.availableTop && pieces.length === 0) {
                             const piece = new RenderedBlockPiece(block.id, blockType, {
                                 title: block.data.title || '目录'
                             });
                             piece.height = tocHeight;
                             piece.width = this.layoutParams.contentWidthPx;
-                            pieces.push({ piece, top: currentTop });
-                            currentTop += tocHeight;
+                            pieces.push({ piece, top: column.currentTop, spanning: true });
+                            column.currentTop += tocHeight;
+                            for (let i = 0; i < page.columns.length; i++) {
+                                page.columns[i].currentTop = column.currentTop;
+                            }
                             currentBlockIndex++;
                         } else {
                             return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: 0, footnotes: pageFootnotes };
@@ -538,15 +947,19 @@ class PaginationEngine {
 
                 case window.Types.BlockType.CROSS_REF: {
                     const refHeight = this.getCrossRefHeight(block);
-                    if (currentTop + refHeight <= page.availableBottom) {
+                    const useWidth = column.getAvailableWidth(column.currentTop);
+                    if (column.currentTop + refHeight <= page.availableBottom) {
                         const piece = new RenderedBlockPiece(block.id, blockType, {
                             targetId: block.data.targetId,
                             targetType: block.data.targetType
                         });
                         piece.height = refHeight;
-                        piece.width = this.layoutParams.contentWidthPx;
-                        pieces.push({ piece, top: currentTop });
-                        currentTop += refHeight + this.layoutParams.paragraphSpacingPx;
+                        piece.width = useWidth;
+                        const leftOffset = column.getLeftOffset(column.currentTop);
+                        const absLeft = this.layoutParams.getColumnLeftPx(columnIndex) + leftOffset;
+                        pieces.push({ piece, top: column.currentTop, left: absLeft, column: columnIndex });
+                        column.currentTop += refHeight + this.layoutParams.paragraphSpacingPx;
+                        column.cleanupFloatingImages(column.currentTop);
                         currentBlockIndex++;
                     } else {
                         return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: 0, footnotes: pageFootnotes };
@@ -560,6 +973,141 @@ class PaginationEngine {
         }
 
         return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: 0, footnotes: pageFootnotes };
+    }
+
+    _balanceLastPageColumns(page) {
+        if (this.layoutParams.columnCount <= 1) return;
+
+        const nonFloatingPieces = page.pieces.filter(p => !p.isSpanning && p.data && !p.data.isFloating);
+        if (nonFloatingPieces.length === 0) return;
+
+        const columnTops = new Map();
+        for (let i = 0; i < this.layoutParams.columnCount; i++) {
+            columnTops.set(i, page.availableTop);
+        }
+
+        for (const piece of page.pieces) {
+            if (piece.isSpanning) continue;
+            const col = piece.columnIndex;
+            const currentTop = columnTops.get(col) || page.availableTop;
+            if (piece.top + piece.height > currentTop) {
+                columnTops.set(col, piece.top + piece.height);
+            }
+        }
+
+        const bottoms = [];
+        for (let i = 0; i < this.layoutParams.columnCount; i++) {
+            bottoms.push(columnTops.get(i) || page.availableTop);
+        }
+
+        const maxBottom = Math.max(...bottoms);
+        const activeBottoms = bottoms.filter(b => b > page.availableTop + this.layoutParams.lineHeightPx);
+        if (activeBottoms.length === 0) return;
+
+        const avgBottom = activeBottoms.reduce((a, b) => a + b, 0) / activeBottoms.length;
+        const minBottom = Math.min(...activeBottoms);
+        const diffLines = Math.max(0, Math.round((maxBottom - minBottom) / this.layoutParams.lineHeightPx));
+        
+        const allColumnsHaveContent = bottoms.every(b => b > page.availableTop + this.layoutParams.lineHeightPx);
+        if (allColumnsHaveContent && diffLines <= 2) return;
+
+        const columnLineCounts = new Map();
+        for (let i = 0; i < this.layoutParams.columnCount; i++) {
+            columnLineCounts.set(i, 0);
+        }
+        for (const piece of nonFloatingPieces) {
+            const col = piece.columnIndex;
+            const lines = piece.data && piece.data.lines ? piece.data.lines.length : Math.max(1, Math.round(piece.height / this.layoutParams.lineHeightPx));
+            columnLineCounts.set(col, (columnLineCounts.get(col) || 0) + lines);
+        }
+
+        const totalLines = [...columnLineCounts.values()].reduce((a, b) => a + b, 0);
+        const activeColumns = [...columnLineCounts.values()].filter(c => c > 0).length;
+        if (activeColumns <= 1 && allColumnsHaveContent) return;
+        const targetLinesPerColumn = Math.ceil(totalLines / this.layoutParams.columnCount);
+
+        const allColumns = [];
+        for (let i = 0; i < this.layoutParams.columnCount; i++) {
+            allColumns.push({
+                index: i,
+                lines: columnLineCounts.get(i) || 0,
+                bottom: bottoms[i]
+            });
+        }
+
+        let redistributed = true;
+        let iterations = 0;
+        while (redistributed && iterations < 10) {
+            redistributed = false;
+            iterations++;
+
+            for (let colIdx = allColumns.length - 2; colIdx >= 0; colIdx--) {
+                const srcCol = allColumns[colIdx];
+                const dstCol = allColumns[colIdx + 1];
+
+                if (srcCol.lines <= targetLinesPerColumn && dstCol.lines >= targetLinesPerColumn) {
+                    continue;
+                }
+
+                const srcHeight = srcCol.bottom;
+                const dstHeight = dstCol.bottom;
+
+                if (srcHeight - dstHeight > this.layoutParams.lineHeightPx * 2 || 
+                    (srcCol.lines > targetLinesPerColumn && dstCol.lines < targetLinesPerColumn)) {
+                    const toMove = Math.min(
+                        Math.max(1, Math.floor((srcHeight - avgBottom) / this.layoutParams.lineHeightPx)),
+                        Math.max(1, srcCol.lines - targetLinesPerColumn)
+                    );
+
+                    if (toMove > 0 && srcCol.lines > 1) {
+                        const colPieces = nonFloatingPieces.filter(p => p.columnIndex === srcCol.index);
+                        colPieces.sort((a, b) => b.top - a.top);
+                        let linesMoved = 0;
+                        for (let i = 0; i < colPieces.length && linesMoved < toMove; i++) {
+                            const piece = colPieces[i];
+                            const pieceLines = piece.data && piece.data.lines ? piece.data.lines.length : Math.max(1, Math.round(piece.height / this.layoutParams.lineHeightPx));
+                            if (linesMoved + pieceLines <= toMove + 2 && !piece.data.partial) {
+                                const newLeft = this.layoutParams.getColumnLeftPx(dstCol.index);
+                                piece.columnIndex = dstCol.index;
+                                piece.left = newLeft;
+                                if (piece.data && piece.data.lines) {
+                                    piece.width = this.layoutParams.columnWidthPx;
+                                }
+                                linesMoved += pieceLines;
+                                redistributed = true;
+                            }
+                        }
+                        if (linesMoved > 0) {
+                            srcCol.lines -= linesMoved;
+                            dstCol.lines += linesMoved;
+                            srcCol.bottom = Math.max(page.availableTop, srcCol.bottom - linesMoved * this.layoutParams.lineHeightPx);
+                            dstCol.bottom = dstCol.bottom + linesMoved * this.layoutParams.lineHeightPx;
+                        }
+                    }
+                }
+            }
+        }
+
+        for (let i = 0; i < this.layoutParams.columnCount; i++) {
+            const colPieces = page.pieces.filter(p => p.columnIndex === i && !p.isSpanning);
+            let runningTop = page.availableTop;
+
+            const sortedPieces = colPieces.sort((a, b) => a.top - b.top);
+            for (const piece of sortedPieces) {
+                if (piece.data && piece.data.isFloating) {
+                    const floatLeft = piece.data.floatType === window.Types.ImageFloatType.LEFT ? 0 : (this.layoutParams.columnWidthPx - piece.width);
+                    piece.left = this.layoutParams.getColumnLeftPx(i) + floatLeft;
+                    runningTop = Math.max(runningTop, piece.top);
+                    continue;
+                }
+                if (Math.abs(piece.top - runningTop) < this.layoutParams.lineHeightPx * 3 || piece.data.continuation) {
+                    piece.top = runningTop;
+                    const leftOffset = 0;
+                    piece.left = this.layoutParams.getColumnLeftPx(i) + leftOffset;
+                }
+                runningTop = piece.top + piece.height;
+            }
+        }
     }
 
     paginate() {
@@ -577,6 +1125,7 @@ class PaginationEngine {
         let partialOffset = 0;
         let pageIndex = 0;
         let pendingContinuationFootnotes = [];
+        let partialBlockInfo = null;
 
         while (currentBlockIndex < this.blocks.length || partialOffset > 0) {
             const page = new Page(pageIndex, this.layoutParams);
@@ -590,131 +1139,164 @@ class PaginationEngine {
                 }
             }
 
-            const startTop = page.availableTop;
+            let allColumnFootnotes = [];
+            let lastResult = null;
 
-            const block = this.blocks[currentBlockIndex];
-            if (partialOffset > 0 && block) {
-                if (block.type === window.Types.BlockType.PARAGRAPH) {
-                    const lines = this.getParagraphLines(block.data.text, block.data.inlineStyles || []);
-                    const remainingHeight = page.getRemainingHeight(startTop);
-                    const availableLines = Math.floor(remainingHeight / this.layoutParams.lineHeightPx);
+            for (let colIdx = 0; colIdx < this.layoutParams.columnCount; colIdx++) {
+                if (colIdx > 0 && currentBlockIndex >= this.blocks.length && partialOffset === 0) {
+                    break;
+                }
 
-                    if (availableLines > 0) {
-                        let endLine = Math.min(partialOffset + availableLines, lines.length);
-                        endLine = this.applyWidowOrphanAdjustment(lines, endLine, partialOffset);
+                const column = page.columns[colIdx];
+                column.currentTop = page.availableTop;
 
-                        if (endLine <= partialOffset) {
-                            endLine = Math.min(partialOffset + 1, lines.length);
-                        }
+                if (partialOffset > 0 && partialBlockInfo && colIdx === 0) {
+                    const block = partialBlockInfo.block;
+                    if (block) {
+                        if (block.type === window.Types.BlockType.PARAGRAPH) {
+                            const useWidth = column.getAvailableWidth(column.currentTop);
+                            const lines = window.LineBreaker.breakLinesMinRaggedness(
+                                block.data.text,
+                                useWidth,
+                                this.layoutParams.fontSizePx,
+                                this.layoutParams.fontFamily,
+                                block.data.inlineStyles || []
+                            );
+                            const remainingHeight = page.getColumnRemainingHeight(colIdx);
+                            const availableLines = Math.floor(remainingHeight / this.layoutParams.lineHeightPx);
 
-                        const contLines = lines.slice(partialOffset, endLine);
-                        const piece = new RenderedBlockPiece(block.id, block.type, {
-                            lines: contLines,
-                            text: block.data.text,
-                            inlineStyles: block.data.inlineStyles || [],
-                            partial: endLine < lines.length,
-                            continuation: true,
-                            nextLine: endLine
-                        });
-                        piece.height = contLines.length * this.layoutParams.lineHeightPx;
-                        piece.width = this.layoutParams.contentWidthPx;
-                        page.addPiece(piece, startTop);
+                            if (availableLines > 0) {
+                                let endLine = Math.min(partialOffset + availableLines, lines.length);
+                                endLine = this.applyWidowOrphanAdjustment(lines, endLine, partialOffset);
 
-                        const footnoteRefs = (block.data.inlineStyles || []).filter(
-                            s => s.type === window.Types.InlineStyleType.FOOTNOTE_REF
-                        );
-                        for (const ref of footnoteRefs) {
-                            if (!this.footnoteMap[ref.footnoteId]) {
-                                this.footnoteCounter++;
-                                this.footnoteMap[ref.footnoteId] = this.footnoteCounter;
-                                page.footnotes.push({
-                                    number: this.footnoteCounter,
-                                    text: ref.footnoteText,
-                                    blockId: block.id
+                                if (endLine <= partialOffset) {
+                                    endLine = Math.min(partialOffset + 1, lines.length);
+                                }
+
+                                const contLines = lines.slice(partialOffset, endLine);
+                                const piece = new RenderedBlockPiece(block.id, block.type, {
+                                    lines: contLines,
+                                    text: block.data.text,
+                                    inlineStyles: block.data.inlineStyles || [],
+                                    partial: endLine < lines.length,
+                                    continuation: true,
+                                    nextLine: endLine
                                 });
-                            }
-                            ref.footnoteNumber = this.footnoteMap[ref.footnoteId];
-                        }
+                                piece.height = contLines.length * this.layoutParams.lineHeightPx;
+                                piece.width = useWidth;
+                                const leftOffset = column.getLeftOffset(column.currentTop);
+                                const absLeft = this.layoutParams.getColumnLeftPx(colIdx) + leftOffset;
+                                page.addPiece(piece, column.currentTop, colIdx, absLeft);
 
-                        const newOffset = endLine;
-                        if (endLine < lines.length) {
-                            partialOffset = newOffset;
+                                const footnoteRefs = (block.data.inlineStyles || []).filter(
+                                    s => s.type === window.Types.InlineStyleType.FOOTNOTE_REF
+                                );
+                                for (const ref of footnoteRefs) {
+                                    if (!this.footnoteMap[ref.footnoteId]) {
+                                        this.footnoteCounter++;
+                                        this.footnoteMap[ref.footnoteId] = this.footnoteCounter;
+                                        page.footnotes.push({
+                                            number: this.footnoteCounter,
+                                            text: ref.footnoteText,
+                                            blockId: block.id
+                                        });
+                                    }
+                                    ref.footnoteNumber = this.footnoteMap[ref.footnoteId];
+                                }
+
+                                if (endLine < lines.length) {
+                                    partialOffset = endLine;
+                                    partialBlockInfo = { block };
+                                } else {
+                                    partialOffset = 0;
+                                    partialBlockInfo = null;
+                                    currentBlockIndex++;
+                                }
+                            } else {
+                                partialOffset = 0;
+                                partialBlockInfo = null;
+                            }
+                        } else if (block.type === window.Types.BlockType.TABLE) {
+                            const remainingHeight = page.getColumnRemainingHeight(colIdx);
+                            const useWidth = column.width;
+                            const tableInfo = this.getTableHeight(block, partialOffset, remainingHeight, useWidth);
+
+                            if (tableInfo.rowsRendered > 0) {
+                                const piece = new RenderedBlockPiece(block.id, block.type, {
+                                    headers: block.data.headers,
+                                    rows: block.data.rows,
+                                    columns: block.data.columns,
+                                    caption: block.data.caption || '',
+                                    startRow: partialOffset,
+                                    rowCount: tableInfo.rowsRendered,
+                                    partial: tableInfo.nextRow < block.data.rows.length,
+                                    continuation: true,
+                                    nextRow: tableInfo.nextRow,
+                                    repeatedHeader: true,
+                                    hideCaption: true,
+                                    renderedWidth: useWidth
+                                });
+                                piece.height = tableInfo.height;
+                                piece.width = useWidth;
+                                const absLeft = this.layoutParams.getColumnLeftPx(colIdx);
+                                page.addPiece(piece, column.currentTop, colIdx, absLeft);
+
+                                if (tableInfo.nextRow < block.data.rows.length) {
+                                    partialOffset = tableInfo.nextRow;
+                                    partialBlockInfo = { block };
+                                } else {
+                                    partialOffset = 0;
+                                    partialBlockInfo = null;
+                                    currentBlockIndex++;
+                                }
+                            } else {
+                                partialOffset = 0;
+                                partialBlockInfo = null;
+                            }
                         } else {
                             partialOffset = 0;
-                            currentBlockIndex++;
+                            partialBlockInfo = null;
                         }
-
-                        if (page.footnotes.length > 0) {
-                            const fnHeight = this.getFootnoteHeight(page.footnotes);
-                            const remainingForContent = page.availableBottom - piece.height - startTop;
-                            if (fnHeight > remainingForContent * 0.5) {
-                                pendingContinuationFootnotes = page.footnotes.slice(1);
-                                page.footnotes = page.footnotes.slice(0, 1);
-                            }
-                            page.footnoteAreaHeight = this.getFootnoteHeight(page.footnotes);
-                        }
-
-                        this.pages.push(page);
-                        pageIndex++;
-                        continue;
-                    } else {
-                        partialOffset = 0;
                     }
-                } else if (block.type === window.Types.BlockType.TABLE) {
-                    const remainingHeight = page.getRemainingHeight(startTop);
-                    const tableInfo = this.getTableHeight(block, partialOffset, remainingHeight);
+                }
 
-                    if (tableInfo.rowsRendered > 0) {
-                        const piece = new RenderedBlockPiece(block.id, block.type, {
-                            headers: block.data.headers,
-                            rows: block.data.rows,
-                            columns: block.data.columns,
-                            caption: block.data.caption || '',
-                            startRow: partialOffset,
-                            rowCount: tableInfo.rowsRendered,
-                            partial: tableInfo.nextRow < block.data.rows.length,
-                            continuation: true,
-                            nextRow: tableInfo.nextRow,
-                            repeatedHeader: true,
-                            hideCaption: true
-                        });
-                        piece.height = tableInfo.height;
-                        piece.width = this.layoutParams.contentWidthPx;
-                        page.addPiece(piece, startTop);
+                const result = this.findBlocksForColumn(currentBlockIndex, partialOffset, page, colIdx);
 
-                        if (tableInfo.nextRow < block.data.rows.length) {
-                            partialOffset = tableInfo.nextRow;
-                        } else {
-                            partialOffset = 0;
-                            currentBlockIndex++;
-                        }
-
-                        this.pages.push(page);
-                        pageIndex++;
-                        continue;
+                for (const item of result.pieces) {
+                    if (item.spanning) {
+                        page.addSpanningPiece(item.piece, item.top);
+                    } else if (item.floating) {
                     } else {
-                        partialOffset = 0;
+                        const col = item.column != null ? item.column : colIdx;
+                        page.addPiece(item.piece, item.top, col, item.left != null ? item.left : this.layoutParams.getColumnLeftPx(col));
                     }
-                } else {
-                    partialOffset = 0;
+                }
+
+                if (result.footnotes.length > 0) {
+                    allColumnFootnotes = allColumnFootnotes.concat(result.footnotes);
+                }
+
+                lastResult = result;
+                currentBlockIndex = result.nextBlockIndex;
+                partialOffset = result.partialOffset;
+
+                if (partialOffset > 0 && result.nextBlockIndex < this.blocks.length) {
+                    partialBlockInfo = { block: this.blocks[result.nextBlockIndex] };
+                }
+
+                if (partialOffset > 0 && colIdx === this.layoutParams.columnCount - 1) {
+                    break;
                 }
             }
 
-            const result = this.findBlocksForPage(currentBlockIndex, startTop, page);
-
-            for (const { piece, top } of result.pieces) {
-                page.addPiece(piece, top);
-            }
-
-            if (result.footnotes.length > 0) {
+            if (allColumnFootnotes.length > 0) {
                 const availableBottom = page.layoutParams.contentHeightPx -
                     (page.layoutParams.showPageNumber ? ptToPx(page.layoutParams.getFooterFontSize()) + 8 : 0);
-                const contentEnd = page.pieces.length > 0 ?
-                    (page.pieces[page.pieces.length - 1].top + page.pieces[page.pieces.length - 1].height) :
-                    startTop;
+                const maxColumnEnd = Math.max(...page.columns.map(c => c.currentTop));
+                const contentEnd = maxColumnEnd;
                 const remaining = availableBottom - contentEnd;
 
-                let fnsToAdd = result.footnotes;
+                let fnsToAdd = allColumnFootnotes;
                 let fnHeight = this.getFootnoteHeight(fnsToAdd);
 
                 while (fnHeight > remaining * 0.4 && fnsToAdd.length > 1) {
@@ -725,9 +1307,6 @@ class PaginationEngine {
                 page.footnotes = fnsToAdd;
                 page.footnoteAreaHeight = fnHeight;
             }
-
-            currentBlockIndex = result.nextBlockIndex;
-            partialOffset = result.partialOffset;
 
             this.pages.push(page);
             pageIndex++;
@@ -744,6 +1323,11 @@ class PaginationEngine {
                 lastPage.footnotes = allFootnotes;
                 lastPage.footnoteAreaHeight = this.getFootnoteHeight(allFootnotes);
             }
+        }
+
+        if (this.pages.length > 0) {
+            const lastPage = this.pages[this.pages.length - 1];
+            this._balanceLastPageColumns(lastPage);
         }
 
         if (this.pages.length === 0) {

@@ -155,8 +155,6 @@ html, body {
 
 .rendered-block {
     position: absolute;
-    left: 0;
-    right: 0;
 }
 
 .rendered-h1,
@@ -347,6 +345,14 @@ ${pageCss}
 
             html += `<div class="page-body">`;
 
+            if (this.layoutParams.showColumnRule && this.layoutParams.columnCount > 1) {
+                for (let i = 1; i < this.layoutParams.columnCount; i++) {
+                    const leftPx = this.layoutParams.getColumnLeftPx(i) - this.layoutParams.columnGapPx / 2;
+                    const leftMm = this._pxToMm(leftPx);
+                    html += `<div style="position:absolute;top:0;bottom:0;left:${leftMm}mm;width:0.3pt;background-color:#ced4da;"></div>`;
+                }
+            }
+
             page.pieces.forEach((piece) => {
                 html += this._renderPiece(piece);
             });
@@ -374,8 +380,12 @@ ${pageCss}
 
     _renderPiece(piece) {
         const topPx = piece.top;
+        const leftPx = piece.left || 0;
+        const widthPx = piece.width;
         const heightPx = piece.height;
         const topMm = this._pxToMm(topPx);
+        const leftMm = this._pxToMm(leftPx);
+        const widthMm = this._pxToMm(widthPx);
         const heightMm = this._pxToMm(heightPx);
 
         let innerHtml = '';
@@ -406,7 +416,7 @@ ${pageCss}
                 break;
         }
 
-        return `<div class="rendered-block rendered-${piece.type}" style="top:${topMm}mm; height:${heightMm}mm;">${innerHtml}</div>`;
+        return `<div class="rendered-block rendered-${piece.type}" style="top:${topMm}mm; left:${leftMm}mm; width:${widthMm}mm; height:${heightMm}mm;">${innerHtml}</div>`;
     }
 
     _renderHeadingPiece(piece) {
@@ -496,8 +506,8 @@ ${pageCss}
     _renderImagePiece(piece) {
         const [w, h] = piece.data.aspectRatio.split(':').map(Number);
         const ratio = h / w;
-        const contentWidthPx = this.layoutParams.contentWidthPx;
-        const imgHeightPx = contentWidthPx * ratio;
+        const renderedWidthPx = piece.data.renderedWidth || piece.width || this.layoutParams.contentWidthPx;
+        const imgHeightPx = renderedWidthPx * ratio;
         const imgHeightMm = this._pxToMm(imgHeightPx);
         const captionFontSizePt = this.layoutParams.fontSizePt * 0.85;
 
@@ -515,7 +525,7 @@ ${pageCss}
         if (displayCaption) {
             const captionLines = window.LineBreaker.breakLinesMinRaggedness(
                 displayCaption,
-                contentWidthPx,
+                renderedWidthPx,
                 ptToPx(captionFontSizePt),
                 this.layoutParams.fontFamily
             );
@@ -534,6 +544,7 @@ ${pageCss}
 
     _renderTablePiece(piece) {
         const data = piece.data;
+        const renderedWidthPx = piece.data.renderedWidth || piece.width || this.layoutParams.contentWidthPx;
         const fontSizePt = this.layoutParams.fontSizePt * 0.9;
         const lineHeight = 1.3;
 
@@ -550,7 +561,7 @@ ${pageCss}
             const captionLineHeightMm = this._pxToMm(captionLineHeightPx);
             const captionLines = window.LineBreaker.breakLinesMinRaggedness(
                 displayCaption,
-                this.layoutParams.contentWidthPx,
+                renderedWidthPx,
                 ptToPx(captionFontSizePt),
                 this.layoutParams.fontFamily
             );
@@ -562,7 +573,7 @@ ${pageCss}
         }
 
         html += `<a id="table-${piece.blockId}" class="heading-anchor"></a>`;
-        html += `<table class="rendered-table" style="font-size:${fontSizePt}pt;line-height:${lineHeight};">`;
+        html += `<table class="rendered-table" style="font-size:${fontSizePt}pt;line-height:${lineHeight};width:100%;">`;
 
         const showHeader = data.startRow === 0 || data.repeatedHeader;
         if (showHeader) {

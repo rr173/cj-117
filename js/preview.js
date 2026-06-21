@@ -102,6 +102,23 @@ class PreviewRenderer {
             line-height: ${this.layoutParams.lineHeight};
         `;
 
+        if (this.layoutParams.showColumnRule && this.layoutParams.columnCount > 1) {
+            for (let i = 1; i < this.layoutParams.columnCount; i++) {
+                const rule = document.createElement('div');
+                rule.className = 'column-rule';
+                const leftPx = this.layoutParams.getColumnLeftPx(i) - this.layoutParams.columnGapPx / 2;
+                rule.style.cssText = `
+                    position: absolute;
+                    top: 0;
+                    bottom: 0;
+                    left: ${leftPx}px;
+                    width: 1px;
+                    background-color: #ced4da;
+                `;
+                body.appendChild(rule);
+            }
+        }
+
         page.pieces.forEach((piece) => {
             const pieceEl = this._createPieceElement(piece);
             body.appendChild(pieceEl);
@@ -150,8 +167,23 @@ class PreviewRenderer {
         const el = document.createElement('div');
         el.className = `rendered-block rendered-${piece.type}`;
         el.style.top = piece.top + 'px';
+        el.style.left = piece.left + 'px';
         el.style.height = piece.height + 'px';
+        el.style.width = piece.width + 'px';
         el.dataset.blockId = piece.blockId;
+
+        if (piece.isSpanning) {
+            el.classList.add('spanning-block');
+        }
+        if (piece.data && piece.data.isFloating) {
+            el.classList.add('floating-block');
+        }
+        if (piece.data && piece.data.floatType === window.Types.ImageFloatType.LEFT) {
+            el.classList.add('float-left');
+        }
+        if (piece.data && piece.data.floatType === window.Types.ImageFloatType.RIGHT) {
+            el.classList.add('float-right');
+        }
 
         if (this.selectedBlockId === piece.blockId) {
             el.classList.add('highlighted');
@@ -298,8 +330,9 @@ class PreviewRenderer {
     _renderImage(el, piece) {
         const [w, h] = piece.data.aspectRatio.split(':').map(Number);
         const ratio = h / w;
-        const contentWidth = this.layoutParams.contentWidthPx;
-        const imgHeight = contentWidth * ratio;
+        const renderedWidth = piece.data.renderedWidth || piece.width || this.layoutParams.contentWidthPx;
+        const imgWidth = renderedWidth;
+        const imgHeight = imgWidth * ratio;
         const captionFontSize = this.layoutParams.fontSizePx * 0.85;
         const captionLineHeight = this.layoutParams.lineHeightPx * 0.85;
 
@@ -310,7 +343,7 @@ class PreviewRenderer {
 
         const captionLines = window.LineBreaker.breakLinesMinRaggedness(
             displayCaption,
-            contentWidth,
+            imgWidth,
             captionFontSize,
             this.layoutParams.fontFamily
         );
@@ -347,6 +380,7 @@ class PreviewRenderer {
 
     _renderTable(el, piece) {
         const data = piece.data;
+        const renderedWidth = piece.data.renderedWidth || piece.width || this.layoutParams.contentWidthPx;
         const fontSizePx = this.layoutParams.fontSizePx * 0.9;
         const lineHeightPx = fontSizePx * 1.3;
         const cellPaddingV = 8;
@@ -363,7 +397,7 @@ class PreviewRenderer {
             const captionLineHeight = this.layoutParams.lineHeightPx * 0.9;
             const captionLines = window.LineBreaker.breakLinesMinRaggedness(
                 displayCaption,
-                this.layoutParams.contentWidthPx,
+                renderedWidth,
                 captionFontSize,
                 this.layoutParams.fontFamily
             );
@@ -375,7 +409,7 @@ class PreviewRenderer {
         }
 
         html += `<a id="table-${piece.blockId}" class="heading-anchor"></a>`;
-        html += `<table class="rendered-table" style="font-size:${fontSizePx}px;line-height:${lineHeightPx}px;">`;
+        html += `<table class="rendered-table" style="font-size:${fontSizePx}px;line-height:${lineHeightPx}px;width:100%;">`;
 
         const showHeader = data.startRow === 0 || data.repeatedHeader;
         if (showHeader) {

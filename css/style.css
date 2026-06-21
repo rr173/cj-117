@@ -478,6 +478,23 @@ html, body {
     right: 0;
 }
 
+.rendered-block.spanning-block {
+    z-index: 1;
+}
+
+.column-rule {
+    z-index: 0;
+    pointer-events: none;
+}
+
+.float-left {
+    z-index: 2;
+}
+
+.float-right {
+    z-index: 2;
+}
+
 .rendered-block.highlighted {
     background: rgba(253, 203, 110, 0.3);
     border-radius: 2px;
