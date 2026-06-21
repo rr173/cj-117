@@ -295,29 +295,22 @@ class Application {
 
         let pageNumberOffset = 0;
         if (this.documentProcessor.tocBlockId) {
+            let firstHeadingPage = -1;
             for (let i = 0; i < pages.length; i++) {
-                const hasToc = pages[i].pieces.some(p => p.blockId === this.documentProcessor.tocBlockId);
-                if (hasToc) {
-                    pageNumberOffset = i + 1;
+                const hasHeading = pages[i].pieces.some(p =>
+                    p.type === window.Types.BlockType.H1 ||
+                    p.type === window.Types.BlockType.H2 ||
+                    p.type === window.Types.BlockType.H3
+                );
+                if (hasHeading) {
+                    firstHeadingPage = i;
+                    break;
                 }
             }
-            if (pageNumberOffset > 0) {
-                let hasBodyAfterToc = false;
-                for (let i = pageNumberOffset; i < pages.length; i++) {
-                    const hasHeading = pages[i].pieces.some(p =>
-                        p.type === window.Types.BlockType.H1 ||
-                        p.type === window.Types.BlockType.H2 ||
-                        p.type === window.Types.BlockType.H3
-                    );
-                    if (hasHeading) {
-                        hasBodyAfterToc = true;
-                        pageNumberOffset = i;
-                        break;
-                    }
-                }
-                if (!hasBodyAfterToc) {
-                    pageNumberOffset = 0;
-                }
+            if (firstHeadingPage >= 0) {
+                pageNumberOffset = firstHeadingPage;
+            } else {
+                pageNumberOffset = 0;
             }
         }
         this.documentProcessor.setPageNumberOffset(pageNumberOffset);
@@ -352,29 +345,22 @@ class Application {
 
         let pageNumberOffset = 0;
         if (this.documentProcessor.tocBlockId) {
+            let firstHeadingPage = -1;
             for (let i = 0; i < pages.length; i++) {
-                const hasToc = pages[i].pieces.some(p => p.blockId === this.documentProcessor.tocBlockId);
-                if (hasToc) {
-                    pageNumberOffset = i + 1;
+                const hasHeading = pages[i].pieces.some(p =>
+                    p.type === window.Types.BlockType.H1 ||
+                    p.type === window.Types.BlockType.H2 ||
+                    p.type === window.Types.BlockType.H3
+                );
+                if (hasHeading) {
+                    firstHeadingPage = i;
+                    break;
                 }
             }
-            if (pageNumberOffset > 0) {
-                let hasBodyAfterToc = false;
-                for (let i = pageNumberOffset; i < pages.length; i++) {
-                    const hasHeading = pages[i].pieces.some(p =>
-                        p.type === window.Types.BlockType.H1 ||
-                        p.type === window.Types.BlockType.H2 ||
-                        p.type === window.Types.BlockType.H3
-                    );
-                    if (hasHeading) {
-                        hasBodyAfterToc = true;
-                        pageNumberOffset = i;
-                        break;
-                    }
-                }
-                if (!hasBodyAfterToc) {
-                    pageNumberOffset = 0;
-                }
+            if (firstHeadingPage >= 0) {
+                pageNumberOffset = firstHeadingPage;
+            } else {
+                pageNumberOffset = 0;
             }
         }
         this.documentProcessor.setPageNumberOffset(pageNumberOffset);
