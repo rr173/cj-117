@@ -5,8 +5,15 @@ class Application {
         this.preview = null;
         this.exporter = null;
         this.documentProcessor = null;
+        this.snapshotManager = null;
+        this.diffEngine = null;
+        this.diffPreview = null;
+        this.revisionManager = null;
         this.layoutParams = new window.Types.LayoutParams();
         this.debounceTimer = null;
+        this.isDiffMode = false;
+        this.currentCompareSnapshotId = null;
+        this.previewingSnapshotId = null;
         this._init();
     }
 
@@ -16,6 +23,10 @@ class Application {
         this.preview = new window.PreviewRenderer('preview-container');
         this.exporter = new window.HtmlExporter();
         this.documentProcessor = new window.DocumentProcessor();
+        this.snapshotManager = new window.SnapshotManager(5);
+        this.diffEngine = new window.DiffEngine();
+        this.diffPreview = new window.DiffPreviewRenderer('diff-preview-container');
+        this.revisionManager = new window.RevisionManager();
 
         this._loadSampleContent();
         this._bindEditorEvents();
@@ -23,8 +34,12 @@ class Application {
         this._bindExportEvents();
         this._bindZoomEvents();
         this._bindDocTitleEvents();
+        this._bindSnapshotEvents();
+        this._bindDiffEvents();
+        this._bindRevisionEvents();
 
         this._updateLayout();
+        this._renderSnapshotList();
     }
 
     _loadSampleContent() {
@@ -369,6 +384,492 @@ class Application {
         this.exporter.setDocumentProcessor(this.documentProcessor);
         this.exporter.setPageNumberOffset(pageNumberOffset);
         this.exporter.exportToHtml();
+    }
+
+    // ============ 快照管理 ============
+    _bindSnapshotEvents() {
+        document.getElementById('btn-new-snapshot').addEventListener('click', () => {
+            this._openSnapshotModal();
+        });
+
+        document.getElementById('snapshot-modal-close').addEventListener('click', () => {
+            this._closeSnapshotModal();
+        });
+        document.getElementById('snapshot-cancel').addEventListener('click', () => {
+            this._closeSnapshotModal();
+        });
+        document.getElementById('snapshot-save').addEventListener('click', () => {
+            this._saveSnapshot();
+        });
+
+        document.getElementById('snapshot-preview-close').addEventListener('click', () => {
+            this._closeSnapshotPreview();
+        });
+        document.getElementById('snapshot-preview-close-btn').addEventListener('click', () => {
+            this._closeSnapshotPreview();
+        });
+        document.getElementById('snapshot-compare-btn').addEventListener('click', () => {
+            this._startDiffFromPreview();
+        });
+
+        document.getElementById('snapshot-modal').addEventListener('click', (e) => {
+            if (e.target.id === 'snapshot-modal') this._closeSnapshotModal();
+        });
+        document.getElementById('snapshot-preview-modal').addEventListener('click', (e) => {
+            if (e.target.id === 'snapshot-preview-modal') this._closeSnapshotPreview();
+        });
+    }
+
+    _openSnapshotModal() {
+        document.getElementById('snapshot-name-input').value = '';
+        document.getElementById('snapshot-modal').classList.remove('hidden');
+        setTimeout(() => {
+            document.getElementById('snapshot-name-input').focus();
+        }, 100);
+    }
+
+    _closeSnapshotModal() {
+        document.getElementById('snapshot-modal').classList.add('hidden');
+    }
+
+    _saveSnapshot() {
+        const nameInput = document.getElementById('snapshot-name-input');
+        let name = nameInput.value.trim();
+
+        if (!name) {
+            const count = this.snapshotManager.getSnapshotCount() + 1;
+            name = `快照 ${count}`;
+        }
+
+        const blocks = this.editor.getBlocks();
+        const docTitle = document.getElementById('doc-title').value;
+        const snapshot = this.snapshotManager.createSnapshot(name, blocks, docTitle);
+
+        this._closeSnapshotModal();
+        this._renderSnapshotList();
+    }
+
+    _renderSnapshotList() {
+        const container = document.getElementById('snapshots-list');
+        const snapshots = this.snapshotManager.getSnapshots();
+
+        if (snapshots.length === 0) {
+            container.innerHTML = `
+                <div class="snapshots-empty">
+                    暂无快照<br>
+                    <small>点击上方"新建"按钮保存当前版本</small>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = '';
+        const sortedSnapshots = [...snapshots].reverse();
+
+        sortedSnapshots.forEach(snapshot => {
+            const item = document.createElement('div');
+            item.className = 'snapshot-item';
+            item.dataset.snapshotId = snapshot.id;
+
+            item.innerHTML = `
+                <div class="snapshot-item-name">${this._escapeHtml(snapshot.name)}</div>
+                <div class="snapshot-item-time">${this.snapshotManager.formatTime(snapshot.createdAt)}</div>
+                <div class="snapshot-item-actions">
+                    <button class="btn btn-small" data-action="preview">👁️ 预览</button>
+                    <button class="btn btn-small" data-action="compare">🔄 对比</button>
+                    <button class="btn btn-small btn-danger" data-action="delete">🗑️ 删除</button>
+                </div>
+            `;
+
+            item.querySelector('[data-action="preview"]').addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._previewSnapshot(snapshot.id);
+            });
+
+            item.querySelector('[data-action="compare"]').addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._startDiff(snapshot.id);
+            });
+
+            item.querySelector('[data-action="delete"]').addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._deleteSnapshot(snapshot.id);
+            });
+
+            item.addEventListener('click', () => {
+                this._previewSnapshot(snapshot.id);
+            });
+
+            container.appendChild(item);
+        });
+    }
+
+    _deleteSnapshot(snapshotId) {
+        if (confirm('确定要删除这个快照吗？')) {
+            this.snapshotManager.deleteSnapshot(snapshotId);
+            this._renderSnapshotList();
+        }
+    }
+
+    _previewSnapshot(snapshotId) {
+        const snapshot = this.snapshotManager.getSnapshot(snapshotId);
+        if (!snapshot) return;
+
+        this.previewingSnapshotId = snapshotId;
+        document.getElementById('snapshot-preview-title').textContent = `📸 ${snapshot.name}`;
+
+        const previewContainer = document.getElementById('snapshot-preview-container');
+        previewContainer.innerHTML = '';
+
+        const tempDp = new window.DocumentProcessor();
+        const tempPaginator = new window.Paginator.PaginationEngine();
+        const tempPreview = new window.PreviewRenderer('snapshot-preview-container');
+
+        tempDp.setParams(this.layoutParams);
+        tempDp.setBlocks(snapshot.blocks);
+        tempDp.process();
+
+        tempPaginator.setParams(this.layoutParams);
+        tempPaginator.setBlocks(snapshot.blocks);
+        tempPaginator.setDocumentProcessor(tempDp);
+
+        const pages = tempPaginator.paginate();
+        tempDp.updatePageIndices(pages);
+
+        let pageNumberOffset = 0;
+        if (tempDp.tocBlockId) {
+            let firstHeadingPage = -1;
+            for (let i = 0; i < pages.length; i++) {
+                const hasHeading = pages[i].pieces.some(p =>
+                    p.type === window.Types.BlockType.H1 ||
+                    p.type === window.Types.BlockType.H2 ||
+                    p.type === window.Types.BlockType.H3
+                );
+                if (hasHeading) {
+                    firstHeadingPage = i;
+                    break;
+                }
+            }
+            if (firstHeadingPage >= 0) {
+                pageNumberOffset = firstHeadingPage;
+            }
+        }
+        tempDp.setPageNumberOffset(pageNumberOffset);
+
+        tempPreview.setParams(this.layoutParams);
+        tempPreview.setPages(pages);
+        tempPreview.setDocTitle(snapshot.docTitle);
+        tempPreview.setDocumentProcessor(tempDp);
+        tempPreview.setPageNumberOffset(pageNumberOffset);
+        tempPreview.setZoom(1);
+        tempPreview.render();
+
+        document.getElementById('snapshot-preview-modal').classList.remove('hidden');
+    }
+
+    _closeSnapshotPreview() {
+        document.getElementById('snapshot-preview-modal').classList.add('hidden');
+        this.previewingSnapshotId = null;
+    }
+
+    _startDiffFromPreview() {
+        if (this.previewingSnapshotId) {
+            this._closeSnapshotPreview();
+            this._startDiff(this.previewingSnapshotId);
+        }
+    }
+
+    // ============ 对比模式 ============
+    _bindDiffEvents() {
+        document.getElementById('btn-exit-diff').addEventListener('click', () => {
+            this._exitDiffMode();
+        });
+
+        document.getElementById('btn-accept-all').addEventListener('click', () => {
+            this._acceptAllRevisions();
+        });
+
+        document.getElementById('btn-reject-all').addEventListener('click', () => {
+            this._rejectAllRevisions();
+        });
+    }
+
+    _bindRevisionEvents() {
+        this.revisionManager.onChange = () => {
+            this._updateRevisionList();
+            this._updateDiffView();
+        };
+
+        this.revisionManager.onComplete = () => {
+            this._onAllRevisionsProcessed();
+        };
+    }
+
+    _startDiff(snapshotId) {
+        const snapshot = this.snapshotManager.getSnapshot(snapshotId);
+        if (!snapshot) return;
+
+        this.currentCompareSnapshotId = snapshotId;
+        this.isDiffMode = true;
+
+        const currentBlocks = this.editor.getBlocks();
+        const snapshotBlocks = snapshot.blocks;
+
+        const diffResult = this.diffEngine.compareDocuments(snapshotBlocks, currentBlocks);
+
+        if (!diffResult.stats.hasChanges) {
+            alert('当前版本与快照内容完全相同，没有差异。');
+            this.isDiffMode = false;
+            this.currentCompareSnapshotId = null;
+            return;
+        }
+
+        this.revisionManager.setData(
+            diffResult,
+            this._deepCloneBlocks(snapshotBlocks),
+            this._deepCloneBlocks(currentBlocks)
+        );
+
+        document.getElementById('diff-subtitle').textContent =
+            `「${snapshot.name}」 vs 当前版本`;
+
+        this._enterDiffMode();
+        this._updateRevisionList();
+        this._updateDiffView();
+    }
+
+    _enterDiffMode() {
+        document.getElementById('normal-preview-header').classList.add('hidden');
+        document.getElementById('diff-preview-header').classList.remove('hidden');
+        document.getElementById('preview-container').classList.add('hidden');
+        document.getElementById('diff-preview-container').classList.remove('hidden');
+        document.getElementById('revision-panel').classList.remove('hidden');
+    }
+
+    _exitDiffMode() {
+        this.isDiffMode = false;
+        this.currentCompareSnapshotId = null;
+
+        document.getElementById('normal-preview-header').classList.remove('hidden');
+        document.getElementById('diff-preview-header').classList.add('hidden');
+        document.getElementById('preview-container').classList.remove('hidden');
+        document.getElementById('diff-preview-container').classList.add('hidden');
+        document.getElementById('revision-panel').classList.add('hidden');
+
+        this.revisionManager.reset();
+        this._updateLayout();
+    }
+
+    _updateDiffView() {
+        if (!this.isDiffMode) return;
+
+        const currentBlocks = this.revisionManager.getResultBlocks();
+        const diffResult = this.revisionManager.diffResult;
+
+        const processedDiff = this._filterProcessedChanges(diffResult);
+
+        const displayBlocks = this._buildDisplayBlocksForDiff(processedDiff);
+
+        this.documentProcessor.setParams(this.layoutParams);
+        this.documentProcessor.setBlocks(displayBlocks);
+        this.documentProcessor.process();
+
+        this.paginator.setParams(this.layoutParams);
+        this.paginator.setBlocks(displayBlocks);
+        this.paginator.setDocumentProcessor(this.documentProcessor);
+
+        const pages = this.paginator.paginate();
+        this.documentProcessor.updatePageIndices(pages);
+
+        let pageNumberOffset = 0;
+        if (this.documentProcessor.tocBlockId) {
+            let firstHeadingPage = -1;
+            for (let i = 0; i < pages.length; i++) {
+                const hasHeading = pages[i].pieces.some(p =>
+                    p.type === window.Types.BlockType.H1 ||
+                    p.type === window.Types.BlockType.H2 ||
+                    p.type === window.Types.BlockType.H3
+                );
+                if (hasHeading) {
+                    firstHeadingPage = i;
+                    break;
+                }
+            }
+            if (firstHeadingPage >= 0) {
+                pageNumberOffset = firstHeadingPage;
+            }
+        }
+        this.documentProcessor.setPageNumberOffset(pageNumberOffset);
+
+        this.diffPreview.setParams(this.layoutParams);
+        this.diffPreview.setPages(pages);
+        this.diffPreview.setDocTitle(document.getElementById('doc-title').value);
+        this.diffPreview.setDocumentProcessor(this.documentProcessor);
+        this.diffPreview.setPageNumberOffset(pageNumberOffset);
+        this.diffPreview.setDiffResult(processedDiff);
+        this.diffPreview.setZoom(parseFloat(document.getElementById('zoom-select').value));
+        this.diffPreview.render();
+    }
+
+    _filterProcessedChanges(diffResult) {
+        const processed = new Set();
+        const changes = diffResult.changes.filter(c => {
+            if (c.type === window.DiffChangeType.UNCHANGED) return true;
+            if (this.revisionManager.isChangeProcessed(c.blockId)) {
+                processed.add(c.blockId);
+                return false;
+            }
+            return true;
+        });
+
+        return {
+            ...diffResult,
+            changes: changes
+        };
+    }
+
+    _buildDisplayBlocksForDiff(filteredDiff) {
+        const blocks = [];
+
+        filteredDiff.changes.forEach(change => {
+            if (change.type === window.DiffChangeType.DELETE) {
+                blocks.push(change.oldBlock);
+            } else {
+                blocks.push(change.newBlock);
+            }
+        });
+
+        return blocks;
+    }
+
+    _updateRevisionList() {
+        const listEl = document.getElementById('revision-list');
+        const statsEl = document.getElementById('revision-stats');
+        const pendingChanges = this.revisionManager.getPendingChanges();
+        const stats = this.revisionManager.getStats();
+
+        statsEl.textContent = `${stats.pending} / ${stats.total} 待处理`;
+
+        listEl.innerHTML = '';
+
+        if (pendingChanges.length === 0) {
+            listEl.innerHTML = `
+                <div style="text-align:center;padding:20px;color:var(--color-text-light);font-size:12px;">
+                    所有修订已处理完毕
+                </div>
+            `;
+            return;
+        }
+
+        pendingChanges.forEach(change => {
+            const item = document.createElement('div');
+            item.className = 'revision-item';
+            item.dataset.blockId = change.blockId;
+
+            const typeLabel = {
+                [window.DiffChangeType.INSERT]: '插入',
+                [window.DiffChangeType.DELETE]: '删除',
+                [window.DiffChangeType.MODIFY]: '修改'
+            }[change.type] || change.type;
+
+            const block = change.newBlock || change.oldBlock;
+            const blockLabel = window.Types.BlockTypeLabels[block.type] || block.type;
+            let blockTitle = this._getBlockPreviewText(block);
+
+            item.innerHTML = `
+                <div class="revision-item-header">
+                    <span class="revision-item-type ${change.type}">${typeLabel}</span>
+                    <span class="revision-item-title">${this._escapeHtml(blockLabel)}: ${this._escapeHtml(blockTitle)}</span>
+                </div>
+                <div class="revision-item-actions">
+                    <button class="btn btn-success btn-small" data-action="accept">✅ 接受</button>
+                    <button class="btn btn-danger btn-small" data-action="reject">❌ 拒绝</button>
+                </div>
+            `;
+
+            item.querySelector('[data-action="accept"]').addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.revisionManager.acceptChange(change.blockId);
+            });
+
+            item.querySelector('[data-action="reject"]').addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.revisionManager.rejectChange(change.blockId);
+            });
+
+            item.addEventListener('click', () => {
+                this._scrollToDiffBlock(change.blockId);
+            });
+
+            listEl.appendChild(item);
+        });
+    }
+
+    _getBlockPreviewText(block) {
+        switch (block.type) {
+            case window.Types.BlockType.H1:
+            case window.Types.BlockType.H2:
+            case window.Types.BlockType.H3:
+                return block.data.text || '(空标题)';
+            case window.Types.BlockType.PARAGRAPH:
+                return (block.data.text || '').substring(0, 30) || '(空段落)';
+            case window.Types.BlockType.IMAGE:
+                return block.data.caption || '(图片)';
+            case window.Types.BlockType.TABLE:
+                return block.data.caption || '(表格)';
+            case window.Types.BlockType.FOOTNOTE_REF:
+                return block.data.refText || '(脚注)';
+            case window.Types.BlockType.TOC:
+                return block.data.title || '目录';
+            case window.Types.BlockType.CROSS_REF:
+                return '(交叉引用)';
+            default:
+                return block.type;
+        }
+    }
+
+    _scrollToDiffBlock(blockId) {
+        const container = document.getElementById('diff-preview-container');
+        const blockEl = container.querySelector(`[data-block-id="${blockId}"]`);
+        if (blockEl) {
+            blockEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }
+
+    _acceptAllRevisions() {
+        if (confirm('确定要接受所有修订吗？')) {
+            this.revisionManager.acceptAll();
+        }
+    }
+
+    _rejectAllRevisions() {
+        if (confirm('确定要拒绝所有修订吗？这会将文档回退到快照版本。')) {
+            this.revisionManager.rejectAll();
+        }
+    }
+
+    _onAllRevisionsProcessed() {
+        const resultBlocks = this.revisionManager.getResultBlocks();
+        this.editor.setBlocks(resultBlocks);
+
+        setTimeout(() => {
+            alert('所有修订已处理完毕，已退出对比模式。');
+            this._exitDiffMode();
+        }, 200);
+    }
+
+    _deepCloneBlocks(blocks) {
+        return blocks.map(block => {
+            const newBlock = new window.Types.ContentBlock(block.type, JSON.parse(JSON.stringify(block.data)));
+            newBlock.id = block.id;
+            return newBlock;
+        });
+    }
+
+    _escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 }
 

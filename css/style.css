@@ -854,3 +854,333 @@ html, body {
     margin-bottom: 6px;
     text-align: center;
 }
+
+/* ============ 快照模块样式 ============ */
+.snapshot-section {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 2px solid var(--color-border);
+}
+
+.snapshot-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.snapshot-header h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.btn-small {
+    padding: 4px 10px;
+    font-size: 12px;
+}
+
+.snapshots-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.snapshot-item {
+    background: #fafbfc;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 8px 10px;
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.snapshot-item:hover {
+    border-color: var(--color-primary);
+    background: #e8f4fc;
+}
+
+.snapshot-item-name {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--color-text);
+    margin-bottom: 2px;
+}
+
+.snapshot-item-time {
+    font-size: 11px;
+    color: var(--color-text-light);
+}
+
+.snapshot-item-actions {
+    display: flex;
+    gap: 4px;
+    margin-top: 6px;
+}
+
+.snapshot-item-actions .btn {
+    flex: 1;
+    padding: 4px;
+    font-size: 11px;
+}
+
+.snapshot-hint {
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--color-text-light);
+    text-align: center;
+}
+
+.snapshots-empty {
+    text-align: center;
+    padding: 20px;
+    color: var(--color-text-light);
+    font-size: 12px;
+    border: 2px dashed var(--color-border);
+    border-radius: var(--radius);
+}
+
+/* ============ 对比视图样式 ============ */
+.hidden {
+    display: none !important;
+}
+
+.diff-view-header {
+    background: #fff3cd;
+    border-bottom-color: #ffc107;
+}
+
+.diff-subtitle {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--color-text-light);
+    margin-left: 8px;
+}
+
+.diff-preview-container {
+    opacity: 1;
+}
+
+/* diff块标记 */
+.diff-block {
+    position: relative;
+    border-radius: 3px;
+}
+
+.diff-insert {
+    background: rgba(0, 184, 148, 0.08);
+    box-shadow: 0 0 0 2px rgba(0, 184, 148, 0.2);
+}
+
+.diff-delete {
+    background: rgba(214, 48, 49, 0.06);
+    box-shadow: 0 0 0 2px rgba(214, 48, 49, 0.15);
+    opacity: 0.7;
+}
+
+.diff-modify {
+    background: rgba(9, 132, 227, 0.06);
+    box-shadow: 0 0 0 2px rgba(9, 132, 227, 0.2);
+}
+
+/* diff徽章 */
+.diff-badge {
+    position: absolute;
+    top: -10px;
+    right: -8px;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+    z-index: 10;
+    white-space: nowrap;
+}
+
+.diff-badge-insert {
+    background: var(--color-success);
+    color: white;
+}
+
+.diff-badge-delete {
+    background: var(--color-danger);
+    color: white;
+}
+
+.diff-badge-modify {
+    background: var(--color-primary);
+    color: white;
+}
+
+/* 内联diff样式 */
+.diff-insert {
+    color: var(--color-success);
+    text-decoration: underline;
+    text-decoration-color: var(--color-success);
+    text-underline-offset: 2px;
+    background: rgba(0, 184, 148, 0.1);
+}
+
+.diff-delete {
+    color: var(--color-danger);
+    text-decoration: line-through;
+    text-decoration-color: var(--color-danger);
+    background: rgba(214, 48, 49, 0.08);
+}
+
+/* ============ 修订列表面板 ============ */
+.revision-panel {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 280px;
+    background: white;
+    border-left: 1px solid var(--color-border);
+    box-shadow: -4px 0 12px rgba(0,0,0,0.08);
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+}
+
+.revision-panel-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--color-border);
+    background: #fafbfc;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.revision-panel-header h3 {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.revision-stats {
+    font-size: 12px;
+    color: var(--color-text-light);
+}
+
+.revision-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+}
+
+.revision-item {
+    background: #fafbfc;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    transition: all var(--transition);
+}
+
+.revision-item:hover {
+    border-color: var(--color-primary);
+}
+
+.revision-item.processed {
+    opacity: 0.5;
+}
+
+.revision-item-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.revision-item-type {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-weight: 600;
+    color: white;
+}
+
+.revision-item-type.insert {
+    background: var(--color-success);
+}
+
+.revision-item-type.delete {
+    background: var(--color-danger);
+}
+
+.revision-item-type.modify {
+    background: var(--color-primary);
+}
+
+.revision-item-title {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--color-text);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.revision-item-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.revision-item-actions .btn {
+    flex: 1;
+    padding: 4px 6px;
+    font-size: 11px;
+}
+
+.btn-success {
+    background: var(--color-success);
+    border-color: var(--color-success);
+    color: white;
+}
+
+.btn-success:hover {
+    background: #00a884;
+    border-color: #00a884;
+    color: white;
+}
+
+/* ============ 弹窗尺寸变体 ============ */
+.modal-small .modal-content {
+    max-width: 400px;
+}
+
+.modal-large .modal-content {
+    max-width: 900px;
+    max-height: 90vh;
+}
+
+.snapshot-preview-body {
+    padding: 20px;
+    background: #e8e9ed;
+    overflow: auto;
+}
+
+.snapshot-preview-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    transform-origin: top center;
+}
+
+.snapshot-preview-container .page {
+    transform: scale(0.7);
+    transform-origin: top center;
+}
+
+/* 响应式调整 */
+.panel-center {
+    position: relative;
+}
+
+.panel-center .preview-body {
+    position: relative;
+}

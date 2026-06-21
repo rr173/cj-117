@@ -40,12 +40,21 @@
                     </div>
 
                     <div id="blocks-list" class="blocks-list"></div>
+
+                    <div class="snapshot-section">
+                        <div class="snapshot-header">
+                            <h3>📸 版本快照</h3>
+                            <button id="btn-new-snapshot" class="btn btn-primary btn-small">+ 新建</button>
+                        </div>
+                        <div id="snapshots-list" class="snapshots-list"></div>
+                        <div class="snapshot-hint">最多保存 5 个快照</div>
+                    </div>
                 </div>
             </aside>
 
             <!-- 中间：预览区 -->
             <main class="panel panel-center">
-                <div class="panel-header preview-header">
+                <div class="panel-header preview-header" id="normal-preview-header">
                     <h2>👀 分页预览</h2>
                     <div class="preview-controls">
                         <label>缩放：</label>
@@ -60,8 +69,28 @@
                         <span id="page-info" class="page-info">第 1 页 / 共 1 页</span>
                     </div>
                 </div>
+
+                <div class="panel-header preview-header diff-view-header hidden" id="diff-preview-header">
+                    <h2>🔄 版本对比 <span class="diff-subtitle" id="diff-subtitle"></span></h2>
+                    <div class="preview-controls">
+                        <button id="btn-accept-all" class="btn btn-success btn-small">✅ 全部接受</button>
+                        <button id="btn-reject-all" class="btn btn-danger btn-small">❌ 全部拒绝</button>
+                        <button id="btn-exit-diff" class="btn btn-secondary btn-small">✕ 退出对比</button>
+                        <span id="diff-page-info" class="page-info">共 1 页</span>
+                    </div>
+                </div>
+
                 <div class="panel-body preview-body">
                     <div id="preview-container" class="preview-container"></div>
+                    <div id="diff-preview-container" class="preview-container diff-preview-container hidden"></div>
+                </div>
+
+                <div class="revision-panel hidden" id="revision-panel">
+                    <div class="revision-panel-header">
+                        <h3>📝 修订列表</h3>
+                        <span class="revision-stats" id="revision-stats"></span>
+                    </div>
+                    <div class="revision-list" id="revision-list"></div>
                 </div>
             </main>
 
@@ -189,6 +218,44 @@
         </div>
     </div>
 
+    <!-- 新建快照弹窗 -->
+    <div id="snapshot-modal" class="modal hidden">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h3>📸 新建快照</h3>
+                <button class="modal-close" id="snapshot-modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>快照名称</label>
+                    <input type="text" id="snapshot-name-input" placeholder="例如：初稿、终稿" maxlength="20">
+                </div>
+                <div class="form-hint">保存当前文档的全部内容为一个命名快照，最多保留 5 个。</div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="snapshot-cancel">取消</button>
+                <button class="btn btn-primary" id="snapshot-save">保存快照</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 快照预览弹窗 -->
+    <div id="snapshot-preview-modal" class="modal hidden">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3 id="snapshot-preview-title">快照预览</h3>
+                <button class="modal-close" id="snapshot-preview-close">&times;</button>
+            </div>
+            <div class="modal-body snapshot-preview-body">
+                <div class="snapshot-preview-container" id="snapshot-preview-container"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="snapshot-preview-close-btn">关闭</button>
+                <button class="btn btn-primary" id="snapshot-compare-btn">🔄 与当前版本对比</button>
+            </div>
+        </div>
+    </div>
+
     <script src="js/types.js"></script>
     <script src="js/linebreaker.js"></script>
     <script src="js/documentProcessor.js"></script>
@@ -196,6 +263,10 @@
     <script src="js/editor.js"></script>
     <script src="js/preview.js"></script>
     <script src="js/exporter.js"></script>
+    <script src="js/snapshotManager.js"></script>
+    <script src="js/diffEngine.js"></script>
+    <script src="js/diffPreview.js"></script>
+    <script src="js/revisionManager.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>
