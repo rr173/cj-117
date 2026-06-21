@@ -167,7 +167,7 @@ class DiffPreviewRenderer {
         if (change && change.type !== window.DiffChangeType.UNCHANGED) {
             diffType = change.type;
             el.classList.add('diff-block');
-            el.classList.add(`diff-${diffType}`);
+            el.classList.add(`diff-block-${diffType}`);
         }
 
         switch (piece.type) {
@@ -224,6 +224,8 @@ class DiffPreviewRenderer {
         let html = '';
 
         if (lines.length > 0) {
+            let globalCharOffset = 0;
+
             lines.forEach((line, idx) => {
                 html += `<span class="rendered-line" style="height:${lineHeightPx}px;line-height:${lineHeightPx}px;">`;
                 if (idx === 0 && this.documentProcessor) {
@@ -234,7 +236,9 @@ class DiffPreviewRenderer {
                 }
 
                 if (diffType === window.DiffChangeType.MODIFY && change && change.inlineDiff) {
-                    html += this._renderLineWithDiff(line.segments || [], change.inlineDiff);
+                    const lineLength = this._getSegmentsTextLength(line.segments || []);
+                    html += this._renderLineWithDiff(line.segments || [], change.inlineDiff, globalCharOffset, lineLength);
+                    globalCharOffset += lineLength;
                 } else {
                     html += this._renderLineWithStyles(line.segments || []);
                 }
@@ -268,10 +272,14 @@ class DiffPreviewRenderer {
         const lineHeightPx = this.layoutParams.lineHeightPx;
 
         let html = '';
+        let globalCharOffset = 0;
+
         lines.forEach((line, idx) => {
             html += `<span class="rendered-line" style="height:${lineHeightPx}px;line-height:${lineHeightPx}px;">`;
             if (diffType === window.DiffChangeType.MODIFY && change && change.inlineDiff) {
-                html += this._renderLineWithDiff(line.segments || [], change.inlineDiff);
+                const lineLength = this._getSegmentsTextLength(line.segments || []);
+                html += this._renderLineWithDiff(line.segments || [], change.inlineDiff, globalCharOffset, lineLength);
+                globalCharOffset += lineLength;
             } else {
                 html += this._renderLineWithStyles(line.segments || []);
             }
@@ -324,13 +332,178 @@ class DiffPreviewRenderer {
         return html;
     }
 
-    _renderLineWithDiff(segments, inlineDiff) {
-        let plainText = '';
+    _getSegmentsTextLength(segments) {
+        let len = 0;
         segments.forEach(seg => {
-            plainText += seg.text;
+            len += seg.text.length;
+        });
+        return len;
+    }
+
+    _renderLineWithDiff(segments, inlineDiff, charOffset, charLength) {
+        if (!inlineDiff || !inlineDiff.operations) {
+            return this._renderLineWithStyles(segments);
+        }
+
+        const subOps = this._sliceInlineDiff(inlineDiff.operations, charOffset, charLength);
+        return this._renderDiffOperations(subOps, segments);
+    }
+
+    _sliceInlineDiff(operations, start, length) {
+        const end = start + length;
+        const result = [];
+        let newTextPos = 0;
+        let pendingDeletes = [];
+
+        const flushPendingDeletes = () => {
+            if (pendingDeletes.length > 0) {
+                pendingDeletes.forEach(d => result.push(d));
+                pendingDeletes = [];
+            }
+        };
+
+        for (let opIdx = 0; opIdx < operations.length; opIdx++) {
+            const op = operations[opIdx];
+
+            if (op.type === window.InlineDiffType.DELETE) {
+                pendingDeletes.push({ type: op.type, text: op.text });
+                continue;
+            }
+
+            const opLen = op.text.length;
+            const opStartNew = newTextPos;
+            const opEndNew = newTextPos + opLen;
+
+            if (opEndNew <= start) {
+                newTextPos = opEndNew;
+                pendingDeletes = [];
+                continue;
+            }
+
+            if (opStartNew >= end) {
+                break;
+            }
+
+            flushPendingDeletes();
+
+            const sliceStart = Math.max(0, start - opStartNew);
+            const sliceEnd = Math.min(opLen, end - opStartNew);
+            const sliceText = op.text.slice(sliceStart, sliceEnd);
+
+            if (sliceText.length > 0) {
+                result.push({ type: op.type, text: sliceText });
+            }
+
+            newTextPos = opEndNew;
+        }
+
+        if (newTextPos < end && pendingDeletes.length > 0) {
+            flushPendingDeletes();
+        }
+
+        return result;
+    }
+
+    _countNewTextUpTo(operations, untilIdx) {
+        let count = 0;
+        for (let i = 0; i < untilIdx; i++) {
+            if (operations[i].type !== window.InlineDiffType.DELETE) {
+                count += operations[i].text.length;
+            }
+        }
+        return count;
+    }
+
+    _countNewTextFrom(operations, fromIdx) {
+        let count = 0;
+        for (let i = fromIdx; i < operations.length; i++) {
+            if (operations[i].type !== window.InlineDiffType.DELETE) {
+                count += operations[i].text.length;
+            }
+        }
+        return count;
+    }
+
+    _renderDiffOperations(operations, segments) {
+        let segIdx = 0;
+        let segInnerPos = 0;
+        let html = '';
+        const usedFootnoteNums = new Set();
+
+        const getNextPlainChunk = (length) => {
+            let result = '';
+            let styles = [];
+            let footnoteNum = null;
+            let remaining = length;
+
+            while (remaining > 0 && segIdx < segments.length) {
+                const seg = segments[segIdx];
+                const segRemain = seg.text.length - segInnerPos;
+                const take = Math.min(segRemain, remaining);
+
+                if (take > 0) {
+                    result += seg.text.slice(segInnerPos, segInnerPos + take);
+                    if (result.length === take) {
+                        styles = seg.styles || [];
+                    }
+                    segInnerPos += take;
+                    remaining -= take;
+
+                    if (segInnerPos >= seg.text.length) {
+                        const segStyles = seg.styles || [];
+                        segStyles.forEach(s => {
+                            if (s.type === window.Types.InlineStyleType.FOOTNOTE_REF &&
+                                s.footnoteNumber != null && !usedFootnoteNums.has(s.footnoteNumber)) {
+                                footnoteNum = s.footnoteNumber;
+                                usedFootnoteNums.add(s.footnoteNumber);
+                            }
+                        });
+                        segIdx++;
+                        segInnerPos = 0;
+                    }
+                }
+            }
+
+            return { text: result, styles, footnoteNum };
+        };
+
+        operations.forEach(op => {
+            if (op.type === window.InlineDiffType.DELETE) {
+                const escaped = this._escapeHtml(op.text);
+                html += `<span class="diff-delete">${escaped}</span>`;
+            } else if (op.type === window.InlineDiffType.INSERT) {
+                const chunk = getNextPlainChunk(op.text.length);
+                const escaped = this._escapeHtml(chunk.text);
+                const classes = [];
+                (chunk.styles || []).forEach(s => {
+                    if (s.type === window.Types.InlineStyleType.BOLD) classes.push('inline-bold');
+                    if (s.type === window.Types.InlineStyleType.ITALIC) classes.push('inline-italic');
+                });
+                classes.push('diff-insert');
+                const classAttr = ` class="${classes.join(' ')}"`;
+                if (chunk.footnoteNum != null) {
+                    html += `<span${classAttr}>${escaped}<sup class="footnote-ref">${chunk.footnoteNum}</sup></span>`;
+                } else {
+                    html += `<span${classAttr}>${escaped}</span>`;
+                }
+            } else {
+                const chunk = getNextPlainChunk(op.text.length);
+                const cleaned = this._escapeHtml(chunk.text).replace(/¹|²|\[ref\]/g, '');
+                const classes = [];
+                (chunk.styles || []).forEach(s => {
+                    if (s.type === window.Types.InlineStyleType.BOLD) classes.push('inline-bold');
+                    if (s.type === window.Types.InlineStyleType.ITALIC) classes.push('inline-italic');
+                });
+                const classAttr = classes.length > 0 ? ` class="${classes.join(' ')}"` : '';
+                if (chunk.footnoteNum != null) {
+                    html += `<span${classAttr}>${cleaned}<sup class="footnote-ref">${chunk.footnoteNum}</sup></span>`;
+                } else {
+                    html += `<span${classAttr}>${cleaned}</span>`;
+                }
+            }
         });
 
-        return this._renderTextWithDiff(plainText, inlineDiff);
+        return html;
     }
 
     _renderTextWithDiff(text, inlineDiff) {
@@ -420,6 +593,10 @@ class DiffPreviewRenderer {
             displayCaption = this.documentProcessor.getTableCaption(piece.blockId) || displayCaption;
         }
 
+        const tableInlineDiff = (diffType === window.DiffChangeType.MODIFY && change && change.inlineDiff && change.inlineDiff.cellDiffs)
+            ? change.inlineDiff
+            : null;
+
         let html = '';
 
         if (displayCaption && !data.continuation) {
@@ -433,7 +610,9 @@ class DiffPreviewRenderer {
             );
             html += `<div class="rendered-table-caption" style="font-size:${captionFontSize}px;line-height:${captionLineHeight}px;margin-bottom:6px;text-align:center;color:#495057;font-weight:600;">`;
             
-            if (diffType === window.DiffChangeType.MODIFY && change && change.inlineDiff) {
+            if (tableInlineDiff && tableInlineDiff.captionDiff) {
+                html += this._renderTextWithDiff(displayCaption, tableInlineDiff.captionDiff);
+            } else if (diffType === window.DiffChangeType.MODIFY && change && change.inlineDiff && !change.inlineDiff.cellDiffs) {
                 html += this._renderTextWithDiff(displayCaption, change.inlineDiff);
             } else {
                 captionLines.forEach(line => {
@@ -460,8 +639,23 @@ class DiffPreviewRenderer {
         const endRow = startRow + (data.rowCount || data.rows.length);
         for (let i = startRow; i < endRow && i < data.rows.length; i++) {
             html += '<tr>';
-            data.rows[i].forEach(cell => {
-                html += `<td style="vertical-align:top;padding:${cellPaddingV}px 6px;">${this._escapeHtml(cell)}</td>`;
+            data.rows[i].forEach((cell, colIdx) => {
+                let cellHtml = '';
+                let cellClass = '';
+
+                if (tableInlineDiff) {
+                    const cellDiff = window.getCellDiff(tableInlineDiff, i, colIdx);
+                    if (cellDiff) {
+                        cellHtml = this._renderTextWithDiff(cell != null ? String(cell) : '', cellDiff);
+                        cellClass = ' class="diff-table-cell"';
+                    } else {
+                        cellHtml = this._escapeHtml(cell);
+                    }
+                } else {
+                    cellHtml = this._escapeHtml(cell);
+                }
+
+                html += `<td${cellClass} style="vertical-align:top;padding:${cellPaddingV}px 6px;">${cellHtml}</td>`;
             });
             html += '</tr>';
         }

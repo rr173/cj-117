@@ -969,18 +969,18 @@ html, body {
     border-radius: 3px;
 }
 
-.diff-insert {
+.diff-block-insert {
     background: rgba(0, 184, 148, 0.08);
     box-shadow: 0 0 0 2px rgba(0, 184, 148, 0.2);
 }
 
-.diff-delete {
+.diff-block-delete {
     background: rgba(214, 48, 49, 0.06);
     box-shadow: 0 0 0 2px rgba(214, 48, 49, 0.15);
     opacity: 0.7;
 }
 
-.diff-modify {
+.diff-block-modify {
     background: rgba(9, 132, 227, 0.06);
     box-shadow: 0 0 0 2px rgba(9, 132, 227, 0.2);
 }
@@ -1027,6 +1027,12 @@ html, body {
     text-decoration: line-through;
     text-decoration-color: var(--color-danger);
     background: rgba(214, 48, 49, 0.08);
+}
+
+.diff-table-cell {
+    background: rgba(9, 132, 227, 0.05);
+    outline: 1px dashed rgba(9, 132, 227, 0.3);
+    outline-offset: -1px;
 }
 
 /* ============ 修订列表面板 ============ */

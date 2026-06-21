@@ -139,6 +139,10 @@ class DiffEngine {
     }
 
     _computeInlineDiff(oldBlock, newBlock) {
+        if (oldBlock.type === window.Types.BlockType.TABLE) {
+            return this._computeTableInlineDiff(oldBlock, newBlock);
+        }
+
         const oldText = this._getBlockMainText(oldBlock);
         const newText = this._getBlockMainText(newBlock);
 
@@ -149,6 +153,60 @@ class DiffEngine {
             newText,
             operations: diffOps
         };
+    }
+
+    _computeTableInlineDiff(oldBlock, newBlock) {
+        const result = {
+            oldCaption: oldBlock.data.caption || '',
+            newCaption: newBlock.data.caption || '',
+            captionDiff: null,
+            cellDiffs: [],
+            operations: []
+        };
+
+        const oldCaption = oldBlock.data.caption || '';
+        const newCaption = newBlock.data.caption || '';
+        if (oldCaption !== newCaption) {
+            result.captionDiff = {
+                oldText: oldCaption,
+                newText: newCaption,
+                operations: this._charDiff(oldCaption, newCaption)
+            };
+        }
+
+        const oldRows = oldBlock.data.rows || [];
+        const newRows = newBlock.data.rows || [];
+        const maxRows = Math.max(oldRows.length, newRows.length);
+
+        for (let r = 0; r < maxRows; r++) {
+            const oldRow = oldRows[r] || [];
+            const newRow = newRows[r] || [];
+            const maxCols = Math.max(oldRow.length, newRow.length);
+
+            for (let c = 0; c < maxCols; c++) {
+                const oldCell = oldRow[c] != null ? oldRow[c] : null;
+                const newCell = newRow[c] != null ? newRow[c] : null;
+
+                if (oldCell !== newCell) {
+                    const oldStr = oldCell != null ? String(oldCell) : '';
+                    const newStr = newCell != null ? String(newCell) : '';
+                    result.cellDiffs.push({
+                        row: r,
+                        col: c,
+                        oldText: oldStr,
+                        newText: newStr,
+                        operations: this._charDiff(oldStr, newStr)
+                    });
+                }
+            }
+        }
+
+        return result;
+    }
+
+    _getCellDiff(tableInlineDiff, row, col) {
+        if (!tableInlineDiff || !tableInlineDiff.cellDiffs) return null;
+        return tableInlineDiff.cellDiffs.find(d => d.row === row && d.col === col) || null;
     }
 
     _getBlockMainText(block) {
@@ -165,8 +223,16 @@ class DiffEngine {
                 return block.data.title || '';
             case window.Types.BlockType.IMAGE:
                 return block.data.caption || '';
-            case window.Types.BlockType.TABLE:
-                return block.data.caption || '';
+            case window.Types.BlockType.TABLE: {
+                const caption = block.data.caption || '';
+                let allCells = '';
+                (block.data.rows || []).forEach(row => {
+                    row.forEach(cell => {
+                        allCells += (cell || '') + ' ';
+                    });
+                });
+                return caption + ' | ' + allCells;
+            }
             default:
                 return '';
         }
@@ -314,4 +380,8 @@ if (typeof window !== 'undefined') {
     window.DiffEngine = DiffEngine;
     window.DiffChangeType = DiffChangeType;
     window.InlineDiffType = InlineDiffType;
+    window.getCellDiff = (tableInlineDiff, row, col) => {
+        if (!tableInlineDiff || !tableInlineDiff.cellDiffs) return null;
+        return tableInlineDiff.cellDiffs.find(d => d.row === row && d.col === col) || null;
+    };
 }
