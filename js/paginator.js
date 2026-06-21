@@ -622,85 +622,123 @@ class PaginationEngine {
                          prevBlock.type === window.Types.BlockType.H2 ||
                          prevBlock.type === window.Types.BlockType.H3);
 
-                    const useWidth = column.getAvailableWidth(column.currentTop);
-                    const lines = window.LineBreaker.breakLinesMinRaggedness(
-                        block.data.text,
-                        useWidth,
-                        this.layoutParams.fontSizePx,
-                        this.layoutParams.fontFamily,
-                        block.data.inlineStyles || []
-                    );
-                    const totalHeight = lines.length * this.layoutParams.lineHeightPx;
+                    const startLine = startOffset || 0;
+                    let lineOffset = startLine;
+                    let paragraphDone = false;
+                    let pieceCreated = false;
+                    let isFirstPieceInBlock = startLine === 0;
+                    let allPiecesCreated = [];
 
-                    const footnoteRefs = (block.data.inlineStyles || []).filter(
-                        s => s.type === window.Types.InlineStyleType.FOOTNOTE_REF
-                    );
-                    for (const ref of footnoteRefs) {
-                        if (!this.footnoteMap[ref.footnoteId]) {
-                            this.footnoteCounter++;
-                            this.footnoteMap[ref.footnoteId] = this.footnoteCounter;
-                            pageFootnotes.push({
-                                number: this.footnoteCounter,
-                                text: ref.footnoteText,
-                                blockId: block.id
-                            });
+                    while (!paragraphDone) {
+                        const segmentTop = column.currentTop;
+                        const curUseWidth = column.getAvailableWidth(segmentTop);
+                        const activeFloats = column.getActiveFloatings(segmentTop);
+
+                        let nextBreakTop = page.availableBottom;
+                        for (const f of activeFloats) {
+                            if (f.bottom > segmentTop && f.bottom < nextBreakTop) {
+                                nextBreakTop = f.bottom;
+                            }
                         }
-                        ref.footnoteNumber = this.footnoteMap[ref.footnoteId];
-                    }
-
-                    if (column.currentTop + totalHeight <= page.availableBottom) {
-                        if (isAfterHeading && lines.length < 2 && pieces.length > 0) {
-                            return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: 0, footnotes: pageFootnotes };
-                        }
-                        const piece = new RenderedBlockPiece(block.id, blockType, {
-                            lines: lines,
-                            text: block.data.text,
-                            inlineStyles: block.data.inlineStyles || []
-                        });
-                        piece.height = totalHeight;
-                        piece.width = useWidth;
-                        const leftOffset = column.getLeftOffset(column.currentTop);
-                        const absLeft = this.layoutParams.getColumnLeftPx(columnIndex) + leftOffset;
-                        pieces.push({ piece, top: column.currentTop, left: absLeft, column: columnIndex });
-                        column.currentTop += totalHeight + this.layoutParams.paragraphSpacingPx;
-                        column.cleanupFloatingImages(column.currentTop);
-                        currentBlockIndex++;
-                    } else {
-                        const availableLines = Math.floor(remainingHeight / this.layoutParams.lineHeightPx);
-
-                        if (availableLines <= 0) {
-                            return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: 0, footnotes: pageFootnotes };
+                        if (activeFloats.length === 0) {
+                            nextBreakTop = page.availableBottom;
                         }
 
-                        if (isAfterHeading && pieces.length > 0) {
-                            if (availableLines < 2) {
+                        const fullLines = window.LineBreaker.breakLinesMinRaggedness(
+                            block.data.text,
+                            curUseWidth,
+                            this.layoutParams.fontSizePx,
+                            this.layoutParams.fontFamily,
+                            block.data.inlineStyles || []
+                        );
+
+                        const remainingLines = fullLines.slice(lineOffset);
+                        if (remainingLines.length === 0) {
+                            paragraphDone = true;
+                            break;
+                        }
+
+                        const maxLinesInSegment = Math.max(1, Math.floor((nextBreakTop - segmentTop) / this.layoutParams.lineHeightPx));
+                        const maxLinesOnPage = Math.max(0, Math.floor((page.availableBottom - segmentTop) / this.layoutParams.lineHeightPx));
+                        let segmentLineCount = Math.min(maxLinesInSegment, remainingLines.length, maxLinesOnPage);
+
+                        if (segmentLineCount <= 0) {
+                            if (!pieceCreated) {
+                                return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: lineOffset, footnotes: pageFootnotes };
+                            }
+                            break;
+                        }
+
+                        if (isFirstPieceInBlock && isAfterHeading && remainingLines.length < 2 && (pieces.length > 0 || allPiecesCreated.length > 0)) {
+                            if (!pieceCreated) {
                                 return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: 0, footnotes: pageFootnotes };
+                            }
+                            break;
+                        }
+
+                        if (!isFirstPieceInBlock && segmentLineCount < 2 && !pieceCreated) {
+                            if (maxLinesOnPage < 2) {
+                                return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: lineOffset, footnotes: pageFootnotes };
                             }
                         }
 
-                        let splitAt = Math.min(availableLines, lines.length);
-                        splitAt = this.applyWidowOrphanAdjustment(lines, splitAt, 0);
+                        let applySplit = segmentLineCount;
+                        if (!pieceCreated && segmentLineCount < remainingLines.length) {
+                            applySplit = this.applyWidowOrphanAdjustment(remainingLines, segmentLineCount, 0);
+                            if (applySplit <= 0) applySplit = segmentLineCount;
+                        }
+                        segmentLineCount = applySplit;
 
-                        if (splitAt <= 0) {
-                            return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: 0, footnotes: pageFootnotes };
+                        const segmentLines = remainingLines.slice(0, segmentLineCount);
+                        const segHeight = segmentLines.length * this.layoutParams.lineHeightPx;
+
+                        const footnoteRefs = (block.data.inlineStyles || []).filter(
+                            s => s.type === window.Types.InlineStyleType.FOOTNOTE_REF
+                        );
+                        for (const ref of footnoteRefs) {
+                            if (!this.footnoteMap[ref.footnoteId]) {
+                                this.footnoteCounter++;
+                                this.footnoteMap[ref.footnoteId] = this.footnoteCounter;
+                                pageFootnotes.push({
+                                    number: this.footnoteCounter,
+                                    text: ref.footnoteText,
+                                    blockId: block.id
+                                });
+                            }
+                            ref.footnoteNumber = this.footnoteMap[ref.footnoteId];
                         }
 
-                        const thisPageLines = lines.slice(0, splitAt);
                         const piece = new RenderedBlockPiece(block.id, blockType, {
-                            lines: thisPageLines,
+                            lines: segmentLines,
                             text: block.data.text,
                             inlineStyles: block.data.inlineStyles || [],
-                            partial: true,
-                            nextLine: splitAt
+                            partial: (lineOffset + segmentLineCount) < fullLines.length,
+                            continuation: !isFirstPieceInBlock,
+                            nextLine: lineOffset + segmentLineCount
                         });
-                        piece.height = thisPageLines.length * this.layoutParams.lineHeightPx;
-                        piece.width = useWidth;
-                        const leftOffset = column.getLeftOffset(column.currentTop);
+                        piece.height = segHeight;
+                        piece.width = curUseWidth;
+                        const leftOffset = column.getLeftOffset(segmentTop);
                         const absLeft = this.layoutParams.getColumnLeftPx(columnIndex) + leftOffset;
-                        pieces.push({ piece, top: column.currentTop, left: absLeft, column: columnIndex });
-                        column.currentTop += piece.height;
+                        const pieceInfo = { piece, top: segmentTop, left: absLeft, column: columnIndex };
+                        pieces.push(pieceInfo);
+                        allPiecesCreated.push(pieceInfo);
+                        pieceCreated = true;
+                        column.currentTop += segHeight;
                         column.cleanupFloatingImages(column.currentTop);
-                        return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: splitAt, footnotes: pageFootnotes };
+
+                        lineOffset += segmentLineCount;
+                        isFirstPieceInBlock = false;
+
+                        if (lineOffset >= fullLines.length) {
+                            column.currentTop += this.layoutParams.paragraphSpacingPx;
+                            paragraphDone = true;
+                            currentBlockIndex++;
+                        } else {
+                            if (column.currentTop >= page.availableBottom - this.layoutParams.lineHeightPx) {
+                                return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: lineOffset, footnotes: pageFootnotes };
+                            }
+                        }
                     }
                     break;
                 }
@@ -981,129 +1019,130 @@ class PaginationEngine {
         const nonFloatingPieces = page.pieces.filter(p => !p.isSpanning && p.data && !p.data.isFloating);
         if (nonFloatingPieces.length === 0) return;
 
+        const spanningPieces = page.pieces.filter(p => p.isSpanning);
+        const floatingPieces = page.pieces.filter(p => p.data && p.data.isFloating);
+
         const columnTops = new Map();
         for (let i = 0; i < this.layoutParams.columnCount; i++) {
             columnTops.set(i, page.availableTop);
         }
-
-        for (const piece of page.pieces) {
-            if (piece.isSpanning) continue;
-            const col = piece.columnIndex;
-            const currentTop = columnTops.get(col) || page.availableTop;
-            if (piece.top + piece.height > currentTop) {
-                columnTops.set(col, piece.top + piece.height);
+        for (const s of spanningPieces) {
+            for (let i = 0; i < this.layoutParams.columnCount; i++) {
+                const cur = columnTops.get(i) || page.availableTop;
+                columnTops.set(i, Math.max(cur, s.top + s.height));
             }
+        }
+        for (const f of floatingPieces) {
+            const colIdx = f.columnIndex;
+            const cur = columnTops.get(colIdx) || page.availableTop;
+            columnTops.set(colIdx, Math.max(cur, f.top));
         }
 
         const bottoms = [];
         for (let i = 0; i < this.layoutParams.columnCount; i++) {
             bottoms.push(columnTops.get(i) || page.availableTop);
         }
+        for (const piece of nonFloatingPieces) {
+            const col = piece.columnIndex;
+            const currentTop = columnTops.get(col) || page.availableTop;
+            if (piece.top + piece.height > currentTop) {
+                columnTops.set(col, piece.top + piece.height);
+                bottoms[col] = piece.top + piece.height;
+            }
+        }
 
-        const maxBottom = Math.max(...bottoms);
         const activeBottoms = bottoms.filter(b => b > page.availableTop + this.layoutParams.lineHeightPx);
         if (activeBottoms.length === 0) return;
 
-        const avgBottom = activeBottoms.reduce((a, b) => a + b, 0) / activeBottoms.length;
+        const maxBottom = Math.max(...bottoms);
         const minBottom = Math.min(...activeBottoms);
         const diffLines = Math.max(0, Math.round((maxBottom - minBottom) / this.layoutParams.lineHeightPx));
-        
         const allColumnsHaveContent = bottoms.every(b => b > page.availableTop + this.layoutParams.lineHeightPx);
         if (allColumnsHaveContent && diffLines <= 2) return;
 
-        const columnLineCounts = new Map();
-        for (let i = 0; i < this.layoutParams.columnCount; i++) {
-            columnLineCounts.set(i, 0);
-        }
-        for (const piece of nonFloatingPieces) {
-            const col = piece.columnIndex;
-            const lines = piece.data && piece.data.lines ? piece.data.lines.length : Math.max(1, Math.round(piece.height / this.layoutParams.lineHeightPx));
-            columnLineCounts.set(col, (columnLineCounts.get(col) || 0) + lines);
-        }
+        nonFloatingPieces.sort((a, b) => {
+            const byTop = a.top - b.top;
+            if (Math.abs(byTop) > this.layoutParams.lineHeightPx) return byTop;
+            return a.columnIndex - b.columnIndex;
+        });
 
-        const totalLines = [...columnLineCounts.values()].reduce((a, b) => a + b, 0);
-        const activeColumns = [...columnLineCounts.values()].filter(c => c > 0).length;
-        if (activeColumns <= 1 && allColumnsHaveContent) return;
+        const totalLines = nonFloatingPieces.reduce((sum, p) => {
+            const l = p.data && p.data.lines ? p.data.lines.length : Math.max(1, Math.round(p.height / this.layoutParams.lineHeightPx));
+            return sum + l;
+        }, 0);
         const targetLinesPerColumn = Math.ceil(totalLines / this.layoutParams.columnCount);
 
-        const allColumns = [];
+        const orderedPieces = [...nonFloatingPieces];
+        const columnLinesAllocated = new Array(this.layoutParams.columnCount).fill(0);
+        const columnCurrentTop = bottoms.map((b, i) => Math.min(bottoms[i], ...bottoms.filter((_, j) => j !== i)));
         for (let i = 0; i < this.layoutParams.columnCount; i++) {
-            allColumns.push({
-                index: i,
-                lines: columnLineCounts.get(i) || 0,
-                bottom: bottoms[i]
-            });
+            columnCurrentTop[i] = page.availableTop;
+            for (const s of spanningPieces) {
+                if (s.top + s.height > columnCurrentTop[i]) {
+                    columnCurrentTop[i] = s.top + s.height;
+                }
+            }
         }
 
-        let redistributed = true;
-        let iterations = 0;
-        while (redistributed && iterations < 10) {
-            redistributed = false;
-            iterations++;
+        for (let i = 0; i < orderedPieces.length; i++) {
+            const piece = orderedPieces[i];
+            const pieceLines = piece.data && piece.data.lines ? piece.data.lines.length : Math.max(1, Math.round(piece.height / this.layoutParams.lineHeightPx));
 
-            for (let colIdx = allColumns.length - 2; colIdx >= 0; colIdx--) {
-                const srcCol = allColumns[colIdx];
-                const dstCol = allColumns[colIdx + 1];
-
-                if (srcCol.lines <= targetLinesPerColumn && dstCol.lines >= targetLinesPerColumn) {
-                    continue;
+            let targetCol = -1;
+            for (let c = 0; c < this.layoutParams.columnCount; c++) {
+                const willBe = columnLinesAllocated[c] + pieceLines;
+                if (willBe <= targetLinesPerColumn || (c > 0 && columnLinesAllocated[c] < columnLinesAllocated[c - 1] - 2)) {
+                    targetCol = c;
+                    break;
                 }
-
-                const srcHeight = srcCol.bottom;
-                const dstHeight = dstCol.bottom;
-
-                if (srcHeight - dstHeight > this.layoutParams.lineHeightPx * 2 || 
-                    (srcCol.lines > targetLinesPerColumn && dstCol.lines < targetLinesPerColumn)) {
-                    const toMove = Math.min(
-                        Math.max(1, Math.floor((srcHeight - avgBottom) / this.layoutParams.lineHeightPx)),
-                        Math.max(1, srcCol.lines - targetLinesPerColumn)
-                    );
-
-                    if (toMove > 0 && srcCol.lines > 1) {
-                        const colPieces = nonFloatingPieces.filter(p => p.columnIndex === srcCol.index);
-                        colPieces.sort((a, b) => b.top - a.top);
-                        let linesMoved = 0;
-                        for (let i = 0; i < colPieces.length && linesMoved < toMove; i++) {
-                            const piece = colPieces[i];
-                            const pieceLines = piece.data && piece.data.lines ? piece.data.lines.length : Math.max(1, Math.round(piece.height / this.layoutParams.lineHeightPx));
-                            if (linesMoved + pieceLines <= toMove + 2 && !piece.data.partial) {
-                                const newLeft = this.layoutParams.getColumnLeftPx(dstCol.index);
-                                piece.columnIndex = dstCol.index;
-                                piece.left = newLeft;
-                                if (piece.data && piece.data.lines) {
-                                    piece.width = this.layoutParams.columnWidthPx;
-                                }
-                                linesMoved += pieceLines;
-                                redistributed = true;
-                            }
-                        }
-                        if (linesMoved > 0) {
-                            srcCol.lines -= linesMoved;
-                            dstCol.lines += linesMoved;
-                            srcCol.bottom = Math.max(page.availableTop, srcCol.bottom - linesMoved * this.layoutParams.lineHeightPx);
-                            dstCol.bottom = dstCol.bottom + linesMoved * this.layoutParams.lineHeightPx;
-                        }
+            }
+            if (targetCol === -1) {
+                let minLines = Infinity;
+                for (let c = 0; c < this.layoutParams.columnCount; c++) {
+                    if (columnLinesAllocated[c] < minLines) {
+                        minLines = columnLinesAllocated[c];
+                        targetCol = c;
                     }
                 }
             }
+            if (targetCol === -1) targetCol = 0;
+
+            piece.columnIndex = targetCol;
+            piece.left = this.layoutParams.getColumnLeftPx(targetCol);
+            if (piece.data && piece.data.lines) {
+                piece.width = this.layoutParams.columnWidthPx;
+            }
+            columnLinesAllocated[targetCol] += pieceLines;
         }
 
         for (let i = 0; i < this.layoutParams.columnCount; i++) {
             const colPieces = page.pieces.filter(p => p.columnIndex === i && !p.isSpanning);
             let runningTop = page.availableTop;
 
-            const sortedPieces = colPieces.sort((a, b) => a.top - b.top);
-            for (const piece of sortedPieces) {
+            for (const s of spanningPieces) {
+                if (s.top + s.height > runningTop) {
+                    runningTop = s.top + s.height;
+                }
+            }
+
+            colPieces.sort((a, b) => {
+                const isFloatA = a.data && a.data.isFloating;
+                const isFloatB = b.data && b.data.isFloating;
+                if (isFloatA && !isFloatB) return -1;
+                if (!isFloatA && isFloatB) return 1;
+                return a.top - b.top;
+            });
+
+            for (const piece of colPieces) {
                 if (piece.data && piece.data.isFloating) {
                     const floatLeft = piece.data.floatType === window.Types.ImageFloatType.LEFT ? 0 : (this.layoutParams.columnWidthPx - piece.width);
                     piece.left = this.layoutParams.getColumnLeftPx(i) + floatLeft;
                     runningTop = Math.max(runningTop, piece.top);
                     continue;
                 }
-                if (Math.abs(piece.top - runningTop) < this.layoutParams.lineHeightPx * 3 || piece.data.continuation) {
+                if (Math.abs(piece.top - runningTop) < this.layoutParams.lineHeightPx * 5 || piece.data.continuation) {
                     piece.top = runningTop;
-                    const leftOffset = 0;
-                    piece.left = this.layoutParams.getColumnLeftPx(i) + leftOffset;
+                    piece.left = this.layoutParams.getColumnLeftPx(i);
                 }
                 runningTop = piece.top + piece.height;
             }
@@ -1148,7 +1187,9 @@ class PaginationEngine {
                 }
 
                 const column = page.columns[colIdx];
-                column.currentTop = page.availableTop;
+                if (colIdx === 0) {
+                    column.currentTop = page.availableTop;
+                }
 
                 if (partialOffset > 0 && partialBlockInfo && colIdx === 0) {
                     const block = partialBlockInfo.block;
