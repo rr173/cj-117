@@ -9,6 +9,8 @@ class Application {
         this.diffEngine = null;
         this.diffPreview = null;
         this.revisionManager = null;
+        this.styleRuleEngine = null;
+        this.styleRuleEditor = null;
         this.layoutParams = new window.Types.LayoutParams();
         this.debounceTimer = null;
         this.isDiffMode = false;
@@ -27,8 +29,22 @@ class Application {
         this.diffEngine = new window.DiffEngine();
         this.diffPreview = new window.DiffPreviewRenderer('diff-preview-container');
         this.revisionManager = new window.RevisionManager();
+        this.styleRuleEngine = new window.StyleRuleEngine();
+        this.styleRuleEditor = new window.StyleRuleEditor('style-rule-editor-container', this.styleRuleEngine);
+
+        this.preview.setStyleRuleEngine(this.styleRuleEngine);
+        this.paginator.setStyleRuleEngine(this.styleRuleEngine);
+
+        this.styleRuleEngine.onChange = () => {
+            this._debounceUpdate();
+            this.styleRuleEditor.refresh();
+        };
+        this.styleRuleEditor.onChange = () => {
+            this._debounceUpdate();
+        };
 
         this._loadSampleContent();
+        this._loadSampleRules();
         this._bindEditorEvents();
         this._bindParamEvents();
         this._bindExportEvents();
@@ -40,6 +56,38 @@ class Application {
 
         this._updateLayout();
         this._renderSnapshotList();
+    }
+
+    _loadSampleRules() {
+        const r1 = new window.Types.StyleRule('所有 H2 标题');
+        r1.conditions.push(new window.Types.StyleRuleCondition(
+            window.Types.RuleConditionType.BLOCK_TYPE,
+            { blockType: window.Types.BlockType.H2 }
+        ));
+        r1.style.color = '#2d3436';
+        r1.style.backgroundColor = '#f1f2f6';
+        r1.style.leftIndentPx = 0;
+        r1.style.border = { style: 'solid', width: 1, color: '#b2bec3', radius: 4 };
+
+        const r2 = new window.Types.StyleRule('H1 后的首段首字下沉');
+        r2.conditions.push(new window.Types.StyleRuleCondition(
+            window.Types.RuleConditionType.POSITION_AFTER_HEADING,
+            { headingLevel: 1 }
+        ));
+        r2.style.dropCap = true;
+        r2.style.firstLineIndentPx = 0;
+
+        const r3 = new window.Types.StyleRule('长段落加左边框');
+        r3.conditions.push(new window.Types.StyleRuleCondition(
+            window.Types.RuleConditionType.CONTENT_LENGTH,
+            { threshold: 80 }
+        ));
+        r3.style.border = { style: 'solid', width: 3, color: '#74b9ff', radius: 0 };
+        r3.style.leftIndentPx = 8;
+
+        this.styleRuleEngine.addRule(r1);
+        this.styleRuleEngine.addRule(r2);
+        this.styleRuleEngine.addRule(r3);
     }
 
     _loadSampleContent() {
@@ -367,6 +415,7 @@ class Application {
         this.documentProcessor.setPageNumberOffset(pageNumberOffset);
 
         this.preview.setParams(this.layoutParams);
+        this.preview.setBlocks(blocks);
         this.preview.setPages(pages);
         this.preview.setDocTitle(docTitle);
         this.preview.setDocumentProcessor(this.documentProcessor);
@@ -374,9 +423,12 @@ class Application {
         this.preview.setSelectedBlockId(this.editor.getSelectedBlockId());
         this.preview.render();
 
+        this.styleRuleEditor.refresh();
+
         this.exporter.setData(pages, this.layoutParams, docTitle);
         this.exporter.setDocumentProcessor(this.documentProcessor);
         this.exporter.setPageNumberOffset(pageNumberOffset);
+        this.exporter.setStyleRuleEngine(this.styleRuleEngine, blocks);
     }
 
     _exportHtml() {
@@ -419,6 +471,7 @@ class Application {
         this.exporter.setData(pages, this.layoutParams, docTitle);
         this.exporter.setDocumentProcessor(this.documentProcessor);
         this.exporter.setPageNumberOffset(pageNumberOffset);
+        this.exporter.setStyleRuleEngine(this.styleRuleEngine, blocks);
         this.exporter.exportToHtml();
     }
 

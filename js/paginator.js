@@ -200,6 +200,8 @@ class PaginationEngine {
         this.sidenoteCounter = 0;
         this.sidenoteMap = {};
         this.documentProcessor = null;
+        this.styleRuleEngine = null;
+        this.blockStyleResults = new Map();
     }
 
     setParams(params) {
@@ -208,10 +210,24 @@ class PaginationEngine {
 
     setBlocks(blocks) {
         this.blocks = blocks;
+        if (this.styleRuleEngine) {
+            this.blockStyleResults = this.styleRuleEngine.processBlocks(blocks);
+        } else {
+            this.blockStyleResults = new Map();
+        }
     }
 
     setDocumentProcessor(dp) {
         this.documentProcessor = dp;
+    }
+
+    setStyleRuleEngine(engine) {
+        this.styleRuleEngine = engine;
+    }
+
+    _blockHasDropCap(blockId) {
+        const result = this.blockStyleResults.get(blockId);
+        return result && result.mergedStyle && result.mergedStyle.dropCap;
     }
 
     getEffectiveWidth(block) {
@@ -702,6 +718,7 @@ class PaginationEngine {
                         (prevBlock.type === window.Types.BlockType.H1 ||
                          prevBlock.type === window.Types.BlockType.H2 ||
                          prevBlock.type === window.Types.BlockType.H3);
+                    const hasDropCap = this._blockHasDropCap(block.id);
 
                     const startLine = startOffset || 0;
                     let lineOffset = startLine;
@@ -757,6 +774,16 @@ class PaginationEngine {
                             break;
                         }
 
+                        if (isFirstPieceInBlock && hasDropCap && !pieceCreated) {
+                            const minLinesForDropCap = Math.min(2, remainingLines.length);
+                            if (maxLinesOnPage < minLinesForDropCap) {
+                                return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: lineOffset, footnotes: pageFootnotes };
+                            }
+                            if (segmentLineCount < minLinesForDropCap) {
+                                return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: lineOffset, footnotes: pageFootnotes };
+                            }
+                        }
+
                         if (!isFirstPieceInBlock && segmentLineCount < 2 && !pieceCreated) {
                             if (maxLinesOnPage < 2) {
                                 return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: lineOffset, footnotes: pageFootnotes };
@@ -768,6 +795,11 @@ class PaginationEngine {
                             applySplit = this.applyWidowOrphanAdjustment(remainingLines, segmentLineCount, 0);
                             if (applySplit <= 0) applySplit = segmentLineCount;
                         }
+
+                        if (isFirstPieceInBlock && hasDropCap && !pieceCreated && applySplit < 2 && remainingLines.length >= 2) {
+                            applySplit = 2;
+                        }
+
                         segmentLineCount = applySplit;
 
                         const segmentLines = remainingLines.slice(0, segmentLineCount);

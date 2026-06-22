@@ -5,6 +5,8 @@ class HtmlExporter {
         this.docTitle = '未命名文档';
         this.documentProcessor = null;
         this.pageNumberOffset = 0;
+        this.styleRuleEngine = null;
+        this.blockStyleResults = new Map();
     }
 
     setData(pages, layoutParams, docTitle) {
@@ -19,6 +21,49 @@ class HtmlExporter {
 
     setPageNumberOffset(offset) {
         this.pageNumberOffset = offset;
+    }
+
+    setStyleRuleEngine(engine, blocks) {
+        this.styleRuleEngine = engine;
+        if (engine && blocks) {
+            this.blockStyleResults = engine.processBlocks(blocks);
+        } else {
+            this.blockStyleResults = new Map();
+        }
+    }
+
+    _getBlockStyle(blockId) {
+        const result = this.blockStyleResults.get(blockId);
+        return result ? result.mergedStyle : null;
+    }
+
+    _hasDropCap(blockId) {
+        const style = this._getBlockStyle(blockId);
+        return style && style.dropCap;
+    }
+
+    _getFirstLineIndent(blockId) {
+        const style = this._getBlockStyle(blockId);
+        return (style && style.firstLineIndentPx > 0) ? style.firstLineIndentPx : 0;
+    }
+
+    _buildInlineBlockStyle(blockId) {
+        const style = this._getBlockStyle(blockId);
+        if (!style) return '';
+        const parts = [];
+        if (style.color) parts.push(`color: ${style.color}`);
+        if (style.backgroundColor) parts.push(`background-color: ${style.backgroundColor}`);
+        if (style.leftIndentPx > 0) parts.push(`padding-left: ${this._pxToMm(style.leftIndentPx)}mm`);
+        if (style.border) {
+            const b = style.border;
+            if (b.style && b.style !== 'none') {
+                const w = this._pxToMm(b.width || 1);
+                const c = b.color || '#000';
+                parts.push(`border: ${w}mm ${b.style} ${c}`);
+                if (b.radius) parts.push(`border-radius: ${this._pxToMm(b.radius)}mm`);
+            }
+        }
+        return parts.length ? parts.join('; ') + ';' : '';
     }
 
     exportToHtml() {
@@ -330,6 +375,22 @@ html, body {
     text-decoration: underline !important;
 }
 
+.drop-cap-letter {
+    float: left;
+    font-size: 2.8em;
+    line-height: 0.85;
+    font-weight: 700;
+    margin-right: 1mm;
+    margin-top: 0.5mm;
+    padding: 0.5mm 0.5mm 0 0;
+    font-family: inherit;
+}
+
+.first-line-with-dropcap {
+    min-height: 2.8em;
+    line-height: 1.4 !important;
+}
+
 .sidenote-ref {
     font-size: 0.65em;
     vertical-align: super;
@@ -448,6 +509,8 @@ ${pageCss}
         const widthMm = this._pxToMm(widthPx);
         const heightMm = this._pxToMm(heightPx);
 
+        const inlineBlockStyle = this._buildInlineBlockStyle(piece.blockId);
+
         let innerHtml = '';
 
         switch (piece.type) {
@@ -479,7 +542,7 @@ ${pageCss}
                 break;
         }
 
-        return `<div class="rendered-block rendered-${piece.type}" style="top:${topMm}mm; left:${leftMm}mm; width:${widthMm}mm; height:${heightMm}mm;">${innerHtml}</div>`;
+        return `<div class="rendered-block rendered-${piece.type}" style="top:${topMm}mm; left:${leftMm}mm; width:${widthMm}mm; height:${heightMm}mm;${inlineBlockStyle ? ' ' + inlineBlockStyle : ''}">${innerHtml}</div>`;
     }
 
     _renderHeadingPiece(piece) {
@@ -523,12 +586,109 @@ ${pageCss}
         const lines = piece.data.lines || [];
         const lineHeightPx = this.layoutParams.lineHeightPx;
         const lineHeightMm = this._pxToMm(lineHeightPx);
+        const hasDropCap = this._hasDropCap(piece.blockId) && !piece.data.continuation;
+        const firstLineIndent = this._getFirstLineIndent(piece.blockId);
+        const isFirstPiece = !piece.data.continuation;
 
         let html = '';
-        lines.forEach(line => {
-            html += `<span class="rendered-line" style="height:${lineHeightMm}mm; line-height:${lineHeightMm}mm;">`;
-            html += this._renderLineSegments(line.segments || []);
+        let dropCapApplied = false;
+
+        lines.forEach((line, idx) => {
+            const isFirstLine = idx === 0 && isFirstPiece;
+            let lineStyle = `height:${lineHeightMm}mm; line-height:${lineHeightMm}mm;`;
+            let extraClass = '';
+
+            if (isFirstLine && hasDropCap) {
+                extraClass = ' first-line-with-dropcap';
+            }
+            if (isFirstLine && firstLineIndent > 0) {
+                lineStyle += ` padding-left:${this._pxToMm(firstLineIndent)}mm;`;
+            }
+
+            html += `<span class="rendered-line${extraClass}" style="${lineStyle}">`;
+
+            if (isFirstLine && hasDropCap && !dropCapApplied) {
+                html += this._renderLineSegmentsWithDropCap(line.segments || []);
+                dropCapApplied = true;
+            } else {
+                html += this._renderLineSegments(line.segments || []);
+            }
+
             html += `</span>`;
+        });
+
+        return html;
+    }
+
+    _renderLineSegmentsWithDropCap(segments) {
+        if (!segments || segments.length === 0) return '';
+
+        let firstCharFound = false;
+        let html = '';
+        const usedFootnoteNums = new Set();
+
+        segments.forEach(seg => {
+            const styles = seg.styles || [];
+            const classes = [];
+            let fnNum = null;
+
+            styles.forEach(s => {
+                if (s.type === window.Types.InlineStyleType.BOLD) classes.push('inline-bold');
+                if (s.type === window.Types.InlineStyleType.ITALIC) classes.push('inline-italic');
+                if (s.type === window.Types.InlineStyleType.FOOTNOTE_REF) {
+                    if (s.footnoteNumber != null && !usedFootnoteNums.has(s.footnoteNumber)) {
+                        fnNum = s.footnoteNumber;
+                        usedFootnoteNums.add(s.footnoteNumber);
+                    }
+                }
+                if (s.type === window.Types.InlineStyleType.MARGIN_NOTE_REF) {
+                    if (s.noteNumber != null && !usedFootnoteNums.has(s.noteNumber)) {
+                        fnNum = s.noteNumber;
+                        usedFootnoteNums.add(s.noteNumber);
+                    }
+                }
+            });
+
+            const classAttr = classes.length ? ` class="${classes.join(' ')}"` : '';
+            let cleanText = this._escapeHtml(seg.text).replace(/¹|²|ⁿ|\[ref\]/g, '');
+
+            if (!firstCharFound && cleanText.length > 0) {
+                firstCharFound = true;
+                let firstChar = cleanText.charAt(0);
+                let restText = cleanText.substring(1);
+
+                if (firstChar && /\s/.test(firstChar) && restText.length > 0) {
+                    let i = 0;
+                    while (i < cleanText.length && /\s/.test(cleanText.charAt(i))) {
+                        i++;
+                    }
+                    if (i < cleanText.length) {
+                        const whitespace = cleanText.substring(0, i);
+                        firstChar = cleanText.charAt(i);
+                        restText = cleanText.substring(i + 1);
+                        html += `<span${classAttr}>${whitespace}<span class="drop-cap-letter">${firstChar}</span>${restText}`;
+                    } else {
+                        html += `<span${classAttr}>${cleanText}`;
+                    }
+                } else {
+                    html += `<span${classAttr}><span class="drop-cap-letter">${firstChar}</span>${restText}`;
+                }
+
+                if (fnNum != null) {
+                    const isSidenote = styles.some(s => s.type === window.Types.InlineStyleType.MARGIN_NOTE_REF);
+                    const refClass = isSidenote ? 'sidenote-ref' : 'footnote-ref';
+                    html += `<sup class="${refClass}" data-note-num="${fnNum}">${fnNum}</sup>`;
+                }
+                html += `</span>`;
+            } else {
+                if (fnNum != null) {
+                    const isSidenote = styles.some(s => s.type === window.Types.InlineStyleType.MARGIN_NOTE_REF);
+                    const refClass = isSidenote ? 'sidenote-ref' : 'footnote-ref';
+                    html += `<span${classAttr}>${cleanText}<sup class="${refClass}" data-note-num="${fnNum}">${fnNum}</sup></span>`;
+                } else {
+                    html += `<span${classAttr}>${cleanText}</span>`;
+                }
+            }
         });
 
         return html;

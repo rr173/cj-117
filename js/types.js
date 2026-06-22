@@ -203,6 +203,67 @@ const ImageFloatType = {
     RIGHT: 'right'
 };
 
+const RuleConditionType = {
+    BLOCK_TYPE: 'blockType',
+    POSITION_AFTER_HEADING: 'afterHeading',
+    POSITION_LAST: 'lastBlock',
+    CONTENT_CONTAINS: 'contentContains',
+    CONTENT_LENGTH: 'contentLength'
+};
+
+const RuleConditionTypeLabels = {
+    [RuleConditionType.BLOCK_TYPE]: '按块类型',
+    [RuleConditionType.POSITION_AFTER_HEADING]: '标题后第一个段落',
+    [RuleConditionType.POSITION_LAST]: '文档最后段落',
+    [RuleConditionType.CONTENT_CONTAINS]: '内容包含关键词',
+    [RuleConditionType.CONTENT_LENGTH]: '段落字数超过'
+};
+
+const RuleBlockTypeOptions = [
+    { value: BlockType.H1, label: '所有 H1 标题' },
+    { value: BlockType.H2, label: '所有 H2 标题' },
+    { value: BlockType.H3, label: '所有 H3 标题' },
+    { value: BlockType.PARAGRAPH, label: '所有正文段落' },
+    { value: BlockType.TABLE, label: '所有表格' },
+    { value: BlockType.IMAGE, label: '所有图片' }
+];
+
+class StyleRuleCondition {
+    constructor(type = RuleConditionType.BLOCK_TYPE, params = {}) {
+        this.type = type;
+        this.params = params;
+    }
+}
+
+class StyleRuleStyle {
+    constructor() {
+        this.color = null;
+        this.backgroundColor = null;
+        this.leftIndentPx = 0;
+        this.firstLineIndentPx = 0;
+        this.dropCap = false;
+        this.border = null;
+    }
+}
+
+class StyleRule {
+    constructor(name = '新规则') {
+        this.id = 'rule_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
+        this.name = name;
+        this.enabled = true;
+        this.conditions = [];
+        this.style = new StyleRuleStyle();
+    }
+}
+
+const RuleBorderStyleOptions = [
+    { value: 'none', label: '无边框' },
+    { value: 'solid', label: '实线' },
+    { value: 'dashed', label: '虚线' },
+    { value: 'dotted', label: '点线' },
+    { value: 'double', label: '双线' }
+];
+
 if (typeof window !== 'undefined') {
     window.Types = {
         BlockType,
@@ -216,6 +277,13 @@ if (typeof window !== 'undefined') {
         InlineStyleType,
         InlineStyle,
         CrossRefTargetType,
-        ImageFloatType
+        ImageFloatType,
+        RuleConditionType,
+        RuleConditionTypeLabels,
+        RuleBlockTypeOptions,
+        StyleRuleCondition,
+        StyleRuleStyle,
+        StyleRule,
+        RuleBorderStyleOptions
     };
 }

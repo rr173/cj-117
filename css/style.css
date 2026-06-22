@@ -1240,3 +1240,273 @@ html, body {
 .panel-center .preview-body {
     position: relative;
 }
+
+/* ============ 条件样式规则编辑器 ============ */
+.rules-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 0 16px 16px;
+}
+
+.rule-item {
+    background: #fafbfc;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    transition: all var(--transition);
+}
+
+.rule-item:hover {
+    border-color: var(--color-primary);
+}
+
+.rule-item.rule-selected {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 2px rgba(9, 132, 227, 0.2);
+}
+
+.rule-item.rule-disabled {
+    opacity: 0.5;
+}
+
+.rule-item.rule-invalid .rule-name {
+    color: var(--color-text-light);
+    font-style: italic;
+}
+
+.rule-item.dragging {
+    opacity: 0.5;
+}
+
+.rule-item.drag-over {
+    border-top: 3px solid var(--color-primary);
+}
+
+.rule-header {
+    display: flex;
+    align-items: center;
+    padding: 8px 10px;
+    background: #f0f2f5;
+    border-bottom: 1px solid var(--color-border);
+    gap: 8px;
+    cursor: pointer;
+}
+
+.rule-drag-handle {
+    cursor: grab;
+    color: var(--color-text-light);
+    font-size: 12px;
+    line-height: 1;
+    user-select: none;
+    padding: 2px 2px;
+}
+
+.rule-drag-handle:active {
+    cursor: grabbing;
+}
+
+.rule-toggle {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+}
+
+.rule-toggle input {
+    cursor: pointer;
+}
+
+.rule-name {
+    flex: 1;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rule-hit-count {
+    flex-shrink: 0;
+}
+
+.hit-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.hit-badge.hit-active {
+    background: rgba(0, 184, 148, 0.15);
+    color: #00b894;
+}
+
+.hit-badge.hit-inactive {
+    background: rgba(156, 163, 175, 0.15);
+    color: #9ca3af;
+}
+
+.rule-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.rule-actions .btn {
+    padding: 2px 6px;
+    font-size: 11px;
+    min-width: 24px;
+}
+
+.rule-body {
+    padding: 12px;
+}
+
+.rule-section {
+    margin-bottom: 14px;
+}
+
+.rule-section:last-child {
+    margin-bottom: 0;
+}
+
+.rule-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-primary);
+    padding-bottom: 4px;
+    border-bottom: 1px dashed var(--color-border);
+}
+
+.rule-section-header .btn {
+    padding: 3px 8px;
+    font-size: 11px;
+}
+
+.rule-conditions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.condition-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: white;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    padding: 6px 8px;
+}
+
+.condition-type-select {
+    flex-shrink: 0;
+}
+
+.condition-type-select select {
+    padding: 4px 6px;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    font-size: 12px;
+    background: white;
+}
+
+.condition-params {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.condition-params select,
+.condition-params input[type="text"],
+.condition-params input[type="number"] {
+    padding: 4px 6px;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.condition-params input[type="checkbox"] {
+    margin: 0;
+}
+
+.condition-item [data-action="delete-condition"] {
+    padding: 2px 6px;
+    font-size: 14px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.rule-style-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.rule-style-grid .param-row label {
+    font-size: 12px;
+}
+
+.rule-style-grid .param-row input[type="number"],
+.rule-style-grid .param-row select,
+.rule-style-grid .param-row input[type="text"] {
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+.rule-style-grid input[type="color"] {
+    width: 32px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+/* ============ 首字下沉样式 ============ */
+.drop-cap-letter {
+    float: left;
+    font-size: 2.8em;
+    line-height: 0.85;
+    font-weight: 700;
+    margin-right: 4px;
+    margin-top: 2px;
+    padding: 2px 2px 0 0;
+    font-family: inherit;
+}
+
+.rendered-line.first-line-with-dropcap {
+    min-height: 2.8em;
+    line-height: 1.4 !important;
+}
+
+/* ============ 规则命中预览高亮 ============ */
+.rule-highlight-outline {
+    outline: 3px solid var(--color-accent);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 4px rgba(253, 203, 110, 0.3);
+    border-radius: 3px;
+    z-index: 10;
+    position: relative;
+}
+
+.rule-highlight-outline::after {
+    content: '';
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 12px;
+    height: 12px;
+    background: var(--color-accent);
+    border-radius: 50%;
+    border: 2px solid white;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}

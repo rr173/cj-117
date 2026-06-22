@@ -8,6 +8,20 @@ class PreviewRenderer {
         this.docTitle = '未命名文档';
         this.documentProcessor = null;
         this.pageNumberOffset = 0;
+        this.styleRuleEngine = null;
+        this.blockStyleResults = new Map();
+    }
+
+    setStyleRuleEngine(engine) {
+        this.styleRuleEngine = engine;
+    }
+
+    setBlocks(blocks) {
+        if (this.styleRuleEngine) {
+            this.blockStyleResults = this.styleRuleEngine.processBlocks(blocks);
+        } else {
+            this.blockStyleResults = new Map();
+        }
     }
 
     setZoom(zoom) {
@@ -193,6 +207,9 @@ class PreviewRenderer {
             el.classList.add('highlighted');
         }
 
+        this._applyBlockRuleStyle(el, piece.blockId);
+        this._applyRuleHighlight(el, piece.blockId);
+
         switch (piece.type) {
             case window.Types.BlockType.H1:
             case window.Types.BlockType.H2:
@@ -223,6 +240,57 @@ class PreviewRenderer {
         }
 
         return el;
+    }
+
+    _applyBlockRuleStyle(el, blockId) {
+        const result = this.blockStyleResults.get(blockId);
+        if (!result || !result.mergedStyle) return;
+        const style = result.mergedStyle;
+
+        if (style.color) {
+            el.style.color = style.color;
+        }
+        if (style.backgroundColor) {
+            el.style.backgroundColor = style.backgroundColor;
+        }
+        if (style.leftIndentPx > 0) {
+            el.style.paddingLeft = style.leftIndentPx + 'px';
+            el.style.boxSizing = 'border-box';
+        }
+        if (style.border) {
+            const b = style.border;
+            if (b.style && b.style !== 'none') {
+                const w = b.width || 1;
+                const c = b.color || '#000';
+                el.style.border = `${w}px ${b.style} ${c}`;
+                if (b.radius) {
+                    el.style.borderRadius = b.radius + 'px';
+                }
+                el.style.boxSizing = 'border-box';
+            }
+        }
+    }
+
+    _applyRuleHighlight(el, blockId) {
+        if (!this.styleRuleEngine || !this.styleRuleEngine.selectedRuleId) return;
+
+        const hitRules = this.styleRuleEngine.getBlockHitRules(blockId);
+        if (hitRules.includes(this.styleRuleEngine.selectedRuleId)) {
+            el.classList.add('rule-highlight-outline');
+        }
+    }
+
+    _hasDropCap(blockId) {
+        const result = this.blockStyleResults.get(blockId);
+        return result && result.mergedStyle && result.mergedStyle.dropCap;
+    }
+
+    _getFirstLineIndent(blockId) {
+        const result = this.blockStyleResults.get(blockId);
+        if (result && result.mergedStyle && result.mergedStyle.firstLineIndentPx > 0) {
+            return result.mergedStyle.firstLineIndentPx;
+        }
+        return 0;
     }
 
     _renderHeading(el, piece) {
@@ -281,15 +349,117 @@ class PreviewRenderer {
     _renderParagraph(el, piece) {
         const lines = piece.data.lines || [];
         const lineHeightPx = this.layoutParams.lineHeightPx;
+        const hasDropCap = this._hasDropCap(piece.blockId) && !piece.data.continuation;
+        const firstLineIndent = this._getFirstLineIndent(piece.blockId);
+        const isFirstPiece = !piece.data.continuation;
 
         let html = '';
+        let dropCapApplied = false;
+
         lines.forEach((line, idx) => {
-            html += `<span class="rendered-line" style="height:${lineHeightPx}px;line-height:${lineHeightPx}px;">`;
-            html += this._renderLineWithStyles(line.segments || []);
+            const isFirstLine = idx === 0 && isFirstPiece;
+            const lineClasses = ['rendered-line'];
+            const lineStyles = [`height:${lineHeightPx}px;line-height:${lineHeightPx}px;`];
+
+            if (isFirstLine && hasDropCap) {
+                lineClasses.push('first-line-with-dropcap');
+            }
+            if (isFirstLine && firstLineIndent > 0) {
+                lineStyles.push(`padding-left:${firstLineIndent}px;`);
+            }
+
+            html += `<span class="${lineClasses.join(' ')}" style="${lineStyles.join('')}">`;
+
+            if (isFirstLine && hasDropCap && !dropCapApplied) {
+                html += this._renderLineWithDropCap(line.segments || [], piece.blockId);
+                dropCapApplied = true;
+            } else {
+                html += this._renderLineWithStyles(line.segments || []);
+            }
+
             html += '</span>';
         });
 
         el.innerHTML = html;
+    }
+
+    _renderLineWithDropCap(segments, blockId) {
+        if (!segments || segments.length === 0) return '';
+
+        let firstCharFound = false;
+        let html = '';
+        const usedFootnoteNums = new Set();
+
+        segments.forEach(seg => {
+            const styles = seg.styles || [];
+            const classes = [];
+            let footnoteNum = null;
+
+            styles.forEach(s => {
+                if (s.type === window.Types.InlineStyleType.BOLD) {
+                    classes.push('inline-bold');
+                } else if (s.type === window.Types.InlineStyleType.ITALIC) {
+                    classes.push('inline-italic');
+                } else if (s.type === window.Types.InlineStyleType.FOOTNOTE_REF) {
+                    if (s.footnoteNumber != null && !usedFootnoteNums.has(s.footnoteNumber)) {
+                        footnoteNum = s.footnoteNumber;
+                        usedFootnoteNums.add(s.footnoteNumber);
+                    }
+                } else if (s.type === window.Types.InlineStyleType.MARGIN_NOTE_REF) {
+                    if (s.noteNumber != null && !usedFootnoteNums.has(s.noteNumber)) {
+                        footnoteNum = s.noteNumber;
+                        usedFootnoteNums.add(s.noteNumber);
+                    }
+                }
+            });
+
+            let text = seg.text;
+            let escapedText = this._escapeHtml(text).replace(/¹|²|ⁿ|\[ref\]/g, '');
+
+            if (!firstCharFound && escapedText.length > 0) {
+                firstCharFound = true;
+                let firstChar = escapedText.charAt(0);
+                let restText = escapedText.substring(1);
+
+                const classAttr = classes.length ? ` class="${classes.join(' ')}"` : '';
+
+                if (firstChar && /\s/.test(firstChar) && restText.length > 0) {
+                    let i = 0;
+                    while (i < escapedText.length && /\s/.test(escapedText.charAt(i))) {
+                        i++;
+                    }
+                    if (i < escapedText.length) {
+                        const whitespace = escapedText.substring(0, i);
+                        firstChar = escapedText.charAt(i);
+                        restText = escapedText.substring(i + 1);
+                        html += `<span${classAttr}>${whitespace}<span class="drop-cap-letter">${firstChar}</span>${restText}`;
+                    } else {
+                        html += `<span${classAttr}>${escapedText}`;
+                    }
+                } else {
+                    html += `<span${classAttr}><span class="drop-cap-letter">${firstChar}</span>${restText}`;
+                }
+
+                if (footnoteNum != null) {
+                    const isSidenote = styles.some(s => s.type === window.Types.InlineStyleType.MARGIN_NOTE_REF);
+                    const refClass = isSidenote ? 'sidenote-ref' : 'footnote-ref';
+                    html += `<sup class="${refClass}" data-note-num="${footnoteNum}">${footnoteNum}</sup>`;
+                }
+                html += `</span>`;
+            } else {
+                const classAttr = classes.length ? ` class="${classes.join(' ')}"` : '';
+
+                if (footnoteNum != null) {
+                    const isSidenote = styles.some(s => s.type === window.Types.InlineStyleType.MARGIN_NOTE_REF);
+                    const refClass = isSidenote ? 'sidenote-ref' : 'footnote-ref';
+                    html += `<span${classAttr}>${escapedText}<sup class="${refClass}" data-note-num="${footnoteNum}">${footnoteNum}</sup></span>`;
+                } else {
+                    html += `<span${classAttr}>${escapedText}</span>`;
+                }
+            }
+        });
+
+        return html;
     }
 
     _renderLineWithStyles(segments) {
