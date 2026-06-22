@@ -144,6 +144,10 @@ class PreviewRenderer {
             body.appendChild(footnoteArea);
         }
 
+        if (page.sidenotes && page.sidenotes.length > 0) {
+            this._renderSidenotes(body, page);
+        }
+
         content.appendChild(body);
 
         if (this.layoutParams.showPageNumber) {
@@ -212,6 +216,9 @@ class PreviewRenderer {
                 break;
             case window.Types.BlockType.CROSS_REF:
                 this._renderCrossRef(el, piece);
+                break;
+            case window.Types.BlockType.MARGIN_NOTE:
+                this._renderParagraph(el, piece);
                 break;
         }
 
@@ -306,6 +313,11 @@ class PreviewRenderer {
                         footnoteNum = s.footnoteNumber;
                         usedFootnoteNums.add(s.footnoteNumber);
                     }
+                } else if (s.type === window.Types.InlineStyleType.MARGIN_NOTE_REF) {
+                    if (s.noteNumber != null && !usedFootnoteNums.has(s.noteNumber)) {
+                        footnoteNum = s.noteNumber;
+                        usedFootnoteNums.add(s.noteNumber);
+                    }
                 }
             });
 
@@ -315,10 +327,12 @@ class PreviewRenderer {
             }
 
             let escapedText = this._escapeHtml(text)
-                .replace(/¹|²|\[ref\]/g, '');
+                .replace(/¹|²|ⁿ|\[ref\]/g, '');
 
             if (footnoteNum != null) {
-                html += `<span${classAttr}>${escapedText}<sup class="footnote-ref">${footnoteNum}</sup></span>`;
+                const isSidenote = styles.some(s => s.type === window.Types.InlineStyleType.MARGIN_NOTE_REF);
+                const refClass = isSidenote ? 'sidenote-ref' : 'footnote-ref';
+                html += `<span${classAttr}>${escapedText}<sup class="${refClass}" data-note-num="${footnoteNum}">${footnoteNum}</sup></span>`;
             } else {
                 html += `<span${classAttr}>${escapedText}</span>`;
             }
@@ -538,6 +552,146 @@ class PreviewRenderer {
 
     getTotalPages() {
         return this.pages.length;
+    }
+
+    _renderSidenotes(body, page) {
+        const sidenoteLeft = this.layoutParams.getSidenoteLeftPx();
+        const sidenoteWidth = this.layoutParams.getSidenoteWidthPx();
+        const contentRightPx = this.layoutParams.getContentRightPx();
+        const contentLeftPx = this.layoutParams.marginLeftPx;
+
+        const sidenoteArea = document.createElement('div');
+        sidenoteArea.className = 'sidenote-area';
+        sidenoteArea.style.cssText = `
+            position: absolute;
+            top: 0;
+            left: ${sidenoteLeft}px;
+            width: ${sidenoteWidth}px;
+            bottom: 0;
+            pointer-events: none;
+        `;
+
+        if (this.layoutParams.showSidenoteGutterLine) {
+            const gutterLine = document.createElement('div');
+            gutterLine.style.cssText = `
+                position: absolute;
+                top: 0;
+                left: -4px;
+                width: 1px;
+                height: 100%;
+                background-color: #dee2e6;
+            `;
+            sidenoteArea.appendChild(gutterLine);
+        }
+
+        const fontSizePx = ptToPx(this.layoutParams.getSidenoteFontSize());
+        const lineHeightPx = fontSizePx * 1.5;
+
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('class', 'sidenote-leaders');
+        svg.setAttribute('style', `
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            overflow: visible;
+        `);
+
+        const notePositions = new Map();
+
+        page.sidenotes.forEach((sidenote, idx) => {
+            notePositions.set(sidenote.number, {
+                top: sidenote.top,
+                height: sidenote.height,
+                anchorTop: sidenote.anchorTop,
+                anchorLeft: sidenote.anchorLeft,
+                sidenoteLeft: sidenoteLeft,
+                number: sidenote.number
+            });
+
+            const noteEl = document.createElement('div');
+            noteEl.className = 'sidenote-item';
+            noteEl.dataset.noteNum = sidenote.number;
+            noteEl.style.cssText = `
+                position: absolute;
+                top: ${sidenote.top}px;
+                left: 0;
+                width: ${sidenoteWidth}px;
+                font-size: ${fontSizePx}px;
+                line-height: ${lineHeightPx}px;
+                color: #495057;
+                padding-left: 2px;
+                box-sizing: border-box;
+            `;
+
+            const noteLines = window.LineBreaker.breakLinesMinRaggedness(
+                sidenote.text || '',
+                sidenoteWidth,
+                fontSizePx,
+                this.layoutParams.fontFamily
+            );
+
+            let noteHtml = `<span class="sidenote-number" style="font-weight:600;color:#2e7d32;">${sidenote.number}</span> `;
+            noteLines.forEach(line => {
+                let lineText = '';
+                line.segments.forEach(seg => {
+                    lineText += this._escapeHtml(seg.text);
+                });
+                noteHtml += `<span class="rendered-line" style="display:block;">${lineText}</span>`;
+            });
+
+            noteEl.innerHTML = noteHtml;
+            sidenoteArea.appendChild(noteEl);
+
+            const noteNum = sidenote.number;
+            const anchorTop = sidenote.anchorTop + this.layoutParams.fontSizePx * 0.3;
+            const noteTop = sidenote.top + fontSizePx * 0.4;
+
+            const anchorRight = contentLeftPx + sidenote.anchorLeft + 8;
+            const contentRight = contentRightPx;
+            const noteLeft = sidenoteLeft;
+            const midX = contentRight + (noteLeft - contentRight) / 2;
+
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            let d = '';
+
+            if (Math.abs(anchorTop - noteTop) < 5) {
+                d = `M ${anchorRight} ${anchorTop} L ${noteLeft} ${noteTop}`;
+            } else {
+                d = `M ${anchorRight} ${anchorTop} L ${contentRight} ${anchorTop} L ${contentRight} ${noteTop} L ${noteLeft} ${noteTop}`;
+            }
+
+            path.setAttribute('d', d);
+            path.setAttribute('stroke', '#adb5bd');
+            path.setAttribute('stroke-width', '1');
+            path.setAttribute('fill', 'none');
+            path.setAttribute('data-note-num', noteNum);
+            svg.appendChild(path);
+        });
+
+        if (page.hasSidenoteContinuation) {
+            const continuationEl = document.createElement('div');
+            continuationEl.className = 'sidenote-continuation';
+            continuationEl.style.cssText = `
+                position: absolute;
+                bottom: 8px;
+                left: 0;
+                width: ${sidenoteWidth}px;
+                font-size: ${fontSizePx}px;
+                color: #6c757d;
+                font-style: italic;
+                text-align: right;
+                padding-right: 4px;
+                box-sizing: border-box;
+            `;
+            continuationEl.textContent = '(续下页)';
+            sidenoteArea.appendChild(continuationEl);
+        }
+
+        sidenoteArea.appendChild(svg);
+        body.appendChild(sidenoteArea);
     }
 }
 

@@ -107,6 +107,9 @@ class Page {
         this.pieces = [];
         this.footnotes = [];
         this.footnoteAreaHeight = 0;
+        this.sidenotes = [];
+        this.sidenoteAreaHeight = 0;
+        this.hasSidenoteContinuation = false;
         this.columns = [];
         for (let i = 0; i < layoutParams.columnCount; i++) {
             this.columns.push(new ColumnState(i, layoutParams));
@@ -194,6 +197,8 @@ class PaginationEngine {
         this.pages = [];
         this.footnoteCounter = 0;
         this.footnoteMap = {};
+        this.sidenoteCounter = 0;
+        this.sidenoteMap = {};
         this.documentProcessor = null;
     }
 
@@ -417,6 +422,59 @@ class PaginationEngine {
 
     getCrossRefHeight(block) {
         return this.layoutParams.lineHeightPx;
+    }
+
+    getSidenoteHeight(block) {
+        const fontSizePx = ptToPx(this.layoutParams.getSidenoteFontSize());
+        const lineHeightPx = fontSizePx * 1.5;
+        const sidenoteWidth = this.layoutParams.getSidenoteWidthPx();
+
+        const lines = window.LineBreaker.breakLinesMinRaggedness(
+            block.data.noteText || '',
+            sidenoteWidth,
+            fontSizePx,
+            this.layoutParams.fontFamily
+        );
+
+        const numberWidth = fontSizePx * 1.5;
+        const adjustedLines = lines.length > 0 ? lines.length : 1;
+
+        return adjustedLines * lineHeightPx + 4;
+    }
+
+    calculateSidenotePositions(page, pendingSidenotes) {
+        const contentHeight = this.layoutParams.contentHeightPx;
+        const sidenoteWidth = this.layoutParams.getSidenoteWidthPx();
+        const fontSizePx = ptToPx(this.layoutParams.getSidenoteFontSize());
+        const lineHeightPx = fontSizePx * 1.5;
+
+        const positionedSidenotes = [];
+        const overflowSidenotes = [];
+
+        let currentTop = page.availableTop;
+
+        pendingSidenotes.forEach(sidenote => {
+            const noteHeight = this.getSidenoteHeight({ data: { noteText: sidenote.text } });
+            let targetTop = sidenote.anchorTop;
+
+            if (targetTop < currentTop) {
+                targetTop = currentTop;
+            }
+
+            if (targetTop + noteHeight > contentHeight - page.footnoteAreaHeight) {
+                overflowSidenotes.push(sidenote);
+            } else {
+                positionedSidenotes.push({
+                    ...sidenote,
+                    top: targetTop,
+                    height: noteHeight,
+                    width: sidenoteWidth
+                });
+                currentTop = targetTop + noteHeight + 6;
+            }
+        });
+
+        return { positioned: positionedSidenotes, overflow: overflowSidenotes };
     }
 
     splitParagraphLinesForPage(lines, startLine, availableHeight, requireComplete = false) {
@@ -1005,6 +1063,85 @@ class PaginationEngine {
                     break;
                 }
 
+                case window.Types.BlockType.MARGIN_NOTE: {
+                    let anchorBlockId = block.data.anchoredBlockId;
+                    if (!anchorBlockId && currentBlockIndex > 0) {
+                        for (let i = currentBlockIndex - 1; i >= 0; i--) {
+                            const prevBlock = this.blocks[i];
+                            if (prevBlock.type !== window.Types.BlockType.MARGIN_NOTE &&
+                                prevBlock.type !== window.Types.BlockType.FOOTNOTE_REF) {
+                                anchorBlockId = prevBlock.id;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!anchorBlockId) {
+                        currentBlockIndex++;
+                        break;
+                    }
+
+                    this.sidenoteCounter++;
+                    const sidenoteNum = this.sidenoteCounter;
+                    this.sidenoteMap[block.id] = sidenoteNum;
+
+                    const anchorTop = column.currentTop;
+                    const anchorLeft = this.layoutParams.getColumnLeftPx(columnIndex) + column.getLeftOffset(column.currentTop);
+
+                    pageFootnotes.push({
+                        type: 'sidenote',
+                        number: sidenoteNum,
+                        text: block.data.noteText || '',
+                        blockId: block.id,
+                        anchorBlockId: anchorBlockId,
+                        anchorTop: anchorTop,
+                        anchorLeft: anchorLeft
+                    });
+
+                    const refText = '';
+                    const fullText = refText + 'ⁿ';
+                    const mnStyle = new window.Types.InlineStyle(
+                        window.Types.InlineStyleType.MARGIN_NOTE_REF,
+                        refText.length,
+                        fullText.length,
+                        { noteNumber: sidenoteNum }
+                    );
+                    const useWidth = column.getAvailableWidth(column.currentTop);
+                    const lines = window.LineBreaker.breakLinesMinRaggedness(
+                        fullText,
+                        useWidth,
+                        this.layoutParams.fontSizePx,
+                        this.layoutParams.fontFamily,
+                        [mnStyle]
+                    );
+
+                    const height = lines.length * this.layoutParams.lineHeightPx;
+                    if (column.currentTop + height <= page.availableBottom) {
+                        const piece = new RenderedBlockPiece(block.id, blockType, {
+                            lines: lines,
+                            text: fullText,
+                            inlineStyles: [mnStyle],
+                            noteNumber: sidenoteNum,
+                            noteText: block.data.noteText,
+                            anchoredBlockId: anchorBlockId,
+                            anchorTop: anchorTop,
+                            anchorLeft: anchorLeft
+                        });
+                        piece.height = height;
+                        piece.width = 0;
+                        piece.isMarginNoteRef = true;
+                        const leftOffset = column.getLeftOffset(column.currentTop);
+                        const absLeft = this.layoutParams.getColumnLeftPx(columnIndex) + leftOffset;
+                        pieces.push({ piece, top: column.currentTop, left: absLeft, column: columnIndex });
+                        column.currentTop += height;
+                        column.cleanupFloatingImages(column.currentTop);
+                        currentBlockIndex++;
+                    } else {
+                        return { pieces, nextBlockIndex: currentBlockIndex, partialOffset: 0, footnotes: pageFootnotes };
+                    }
+                    break;
+                }
+
                 default:
                     currentBlockIndex++;
             }
@@ -1153,6 +1290,8 @@ class PaginationEngine {
         this.pages = [];
         this.footnoteCounter = 0;
         this.footnoteMap = {};
+        this.sidenoteCounter = 0;
+        this.sidenoteMap = {};
 
         if (this.blocks.length === 0) {
             const page = new Page(0, this.layoutParams);
@@ -1164,6 +1303,7 @@ class PaginationEngine {
         let partialOffset = 0;
         let pageIndex = 0;
         let pendingContinuationFootnotes = [];
+        let pendingOverflowSidenotes = [];
         let partialBlockInfo = null;
 
         while (currentBlockIndex < this.blocks.length || partialOffset > 0) {
@@ -1337,7 +1477,10 @@ class PaginationEngine {
                 const contentEnd = maxColumnEnd;
                 const remaining = availableBottom - contentEnd;
 
-                let fnsToAdd = allColumnFootnotes;
+                const regularFootnotes = allColumnFootnotes.filter(f => f.type !== 'sidenote');
+                const sidenotes = allColumnFootnotes.filter(f => f.type === 'sidenote');
+
+                let fnsToAdd = regularFootnotes;
                 let fnHeight = this.getFootnoteHeight(fnsToAdd);
 
                 while (fnHeight > remaining * 0.4 && fnsToAdd.length > 1) {
@@ -1347,6 +1490,35 @@ class PaginationEngine {
 
                 page.footnotes = fnsToAdd;
                 page.footnoteAreaHeight = fnHeight;
+
+                if (sidenotes.length > 0 || pendingOverflowSidenotes.length > 0) {
+                    let allSidenotes = [...pendingOverflowSidenotes, ...sidenotes];
+                    pendingOverflowSidenotes = [];
+
+                    const sidenoteResult = this.calculateSidenotePositions(page, allSidenotes);
+
+                    if (sidenoteResult.positioned.length > 0) {
+                        page.sidenotes = sidenoteResult.positioned;
+                        const maxNoteBottom = Math.max(...sidenoteResult.positioned.map(s => s.top + s.height));
+                        page.sidenoteAreaHeight = Math.max(0, maxNoteBottom - page.availableTop);
+                    }
+
+                    if (sidenoteResult.overflow.length > 0) {
+                        pendingOverflowSidenotes = sidenoteResult.overflow;
+                        page.hasSidenoteContinuation = true;
+                    }
+                }
+            } else if (pendingOverflowSidenotes.length > 0) {
+                const sidenoteResult = this.calculateSidenotePositions(page, pendingOverflowSidenotes);
+                if (sidenoteResult.positioned.length > 0) {
+                    page.sidenotes = sidenoteResult.positioned;
+                    const maxNoteBottom = Math.max(...sidenoteResult.positioned.map(s => s.top + s.height));
+                    page.sidenoteAreaHeight = Math.max(0, maxNoteBottom - page.availableTop);
+                }
+                pendingOverflowSidenotes = sidenoteResult.overflow;
+                if (pendingOverflowSidenotes.length > 0) {
+                    page.hasSidenoteContinuation = true;
+                }
             }
 
             this.pages.push(page);
@@ -1363,6 +1535,40 @@ class PaginationEngine {
                 const allFootnotes = [...lastPage.footnotes, ...pendingContinuationFootnotes];
                 lastPage.footnotes = allFootnotes;
                 lastPage.footnoteAreaHeight = this.getFootnoteHeight(allFootnotes);
+            }
+        }
+
+        if (pendingOverflowSidenotes.length > 0) {
+            const lastPage = this.pages[this.pages.length - 1];
+            if (lastPage) {
+                const contentHeight = this.layoutParams.contentHeightPx;
+                let currentTop = lastPage.availableTop;
+                if (lastPage.sidenotes.length > 0) {
+                    currentTop = Math.max(...lastPage.sidenotes.map(s => s.top + s.height)) + 6;
+                }
+
+                const remaining = contentHeight - lastPage.footnoteAreaHeight - currentTop;
+                if (remaining > 20) {
+                    const newSidenotes = [];
+                    for (const sn of pendingOverflowSidenotes) {
+                        const noteHeight = this.getSidenoteHeight({ data: { noteText: sn.text } });
+                        if (currentTop + noteHeight < contentHeight - lastPage.footnoteAreaHeight) {
+                            newSidenotes.push({
+                                ...sn,
+                                top: currentTop,
+                                height: noteHeight,
+                                width: this.layoutParams.getSidenoteWidthPx()
+                            });
+                            currentTop += noteHeight + 6;
+                        }
+                    }
+                    lastPage.sidenotes = [...lastPage.sidenotes, ...newSidenotes];
+                    if (newSidenotes.length > 0) {
+                        const maxNoteBottom = Math.max(...newSidenotes.map(s => s.top + s.height));
+                        lastPage.sidenoteAreaHeight = Math.max(lastPage.sidenoteAreaHeight, maxNoteBottom - lastPage.availableTop);
+                    }
+                    lastPage.hasSidenoteContinuation = false;
+                }
             }
         }
 

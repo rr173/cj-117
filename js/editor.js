@@ -348,6 +348,26 @@ class ContentEditor {
                 break;
             }
 
+            case window.Types.BlockType.MARGIN_NOTE: {
+                let anchorLabel = '未锚定';
+                if (block.data.anchoredBlockId) {
+                    const anchorBlock = this.blocks.find(b => b.id === block.data.anchoredBlockId);
+                    if (anchorBlock) {
+                        anchorLabel = window.Types.BlockTypeLabels[anchorBlock.type] || anchorBlock.type;
+                        if (anchorBlock.data.text) {
+                            anchorLabel += ': ' + anchorBlock.data.text.substring(0, 15);
+                        }
+                    }
+                }
+                preview.innerHTML = `
+                    <div style="padding:8px;background:#e8f5e9;border:1px dashed #66bb6a;border-radius:4px;">
+                        📝 页边批注 → 锚定: <strong>${this._escapeHtml(anchorLabel)}</strong>
+                        <br><small style="color:#2e7d32">批注内容: ${this._escapeHtml((block.data.noteText || '').substring(0, 30)) || '(空)'}</small>
+                    </div>
+                `;
+                break;
+            }
+
             default:
                 preview.textContent = '未知类型';
         }
@@ -377,6 +397,8 @@ class ContentEditor {
                     result += '<em>';
                 } else if (s.type === window.Types.InlineStyleType.FOOTNOTE_REF) {
                     result += `<sup style="color:#0984e3;font-weight:600;">[${s.footnoteNumber || 'fn'}]</sup>`;
+                } else if (s.type === window.Types.InlineStyleType.MARGIN_NOTE_REF) {
+                    result += `<sup style="color:#2e7d32;font-weight:600;">[${s.noteNumber || 'n'}]</sup>`;
                 }
             }
 
@@ -457,6 +479,10 @@ class ContentEditor {
             case window.Types.BlockType.CROSS_REF:
                 modalBody.innerHTML = this._createCrossRefEditor(block);
                 this._initCrossRefEditorEvents(block);
+                break;
+
+            case window.Types.BlockType.MARGIN_NOTE:
+                modalBody.innerHTML = this._createMarginNoteEditor(block);
                 break;
         }
 
@@ -734,6 +760,50 @@ class ContentEditor {
         `;
     }
 
+    _createMarginNoteEditor(block) {
+        const blockIndex = this.blocks.findIndex(b => b.id === block.id);
+        const availableAnchors = [];
+
+        for (let i = 0; i < blockIndex; i++) {
+            const b = this.blocks[i];
+            if (b.type !== window.Types.BlockType.MARGIN_NOTE &&
+                b.type !== window.Types.BlockType.TOC) {
+                let label = window.Types.BlockTypeLabels[b.type] || b.type;
+                if (b.data.text) {
+                    label += ': ' + b.data.text.substring(0, 20);
+                } else if (b.data.caption) {
+                    label += ': ' + b.data.caption.substring(0, 20);
+                }
+                availableAnchors.push({ id: b.id, label });
+            }
+        }
+
+        let anchorOptions = '';
+        if (availableAnchors.length === 0) {
+            anchorOptions = '<option value="">（请先在前面添加内容块）</option>';
+        } else {
+            anchorOptions = availableAnchors.map(a =>
+                `<option value="${a.id}" ${block.data.anchoredBlockId === a.id ? 'selected' : ''}>${this._escapeHtml(a.label)}</option>`
+            ).join('');
+        }
+
+        return `
+            <div class="form-group">
+                <label>锚定到前一个内容块</label>
+                <select id="edit-anchor-block-id">
+                    ${anchorOptions}
+                </select>
+                <div class="form-hint">
+                    批注会在选中的内容块末尾显示上标编号，批注内容显示在页面右侧旁注栏。
+                </div>
+            </div>
+            <div class="form-group">
+                <label>批注内容</label>
+                <textarea id="edit-note-text" placeholder="输入批注内容...">${this._escapeHtml(block.data.noteText || '')}</textarea>
+            </div>
+        `;
+    }
+
     closeModal() {
         this.modal.classList.add('hidden');
         this.editingBlockId = null;
@@ -797,6 +867,13 @@ class ContentEditor {
                 const selectedOption = targetSelect.options[targetSelect.selectedIndex];
                 const finalTargetType = selectedOption && selectedOption.dataset.type ? selectedOption.dataset.type : targetType;
                 this.updateBlock(block.id, { targetId, targetType: finalTargetType });
+                break;
+            }
+
+            case window.Types.BlockType.MARGIN_NOTE: {
+                const anchoredBlockId = document.getElementById('edit-anchor-block-id').value;
+                const noteText = document.getElementById('edit-note-text').value;
+                this.updateBlock(block.id, { anchoredBlockId, noteText });
                 break;
             }
         }

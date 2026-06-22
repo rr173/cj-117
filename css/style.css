@@ -598,6 +598,39 @@ html, body {
     font-weight: 600;
 }
 
+.sidenote-ref {
+    font-size: 0.65em;
+    vertical-align: super;
+    line-height: 0;
+    color: #2e7d32;
+    font-weight: 600;
+}
+
+.sidenote-area {
+    position: absolute;
+    pointer-events: none;
+    z-index: 5;
+}
+
+.sidenote-item {
+    text-align: left;
+}
+
+.sidenote-number {
+    font-weight: 600;
+    color: #2e7d32;
+}
+
+.sidenote-continuation {
+    font-size: 0.85em;
+    color: #6c757d;
+    font-style: italic;
+}
+
+.sidenote-leaders {
+    z-index: 4;
+}
+
 .inline-bold {
     font-weight: 700;
 }

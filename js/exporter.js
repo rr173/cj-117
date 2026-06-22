@@ -330,6 +330,62 @@ html, body {
     text-decoration: underline !important;
 }
 
+.sidenote-ref {
+    font-size: 0.65em;
+    vertical-align: super;
+    line-height: 0;
+    color: #2e7d32;
+    font-weight: 600;
+}
+
+.sidenote-area {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: ${params.sidenoteWidthMm}mm;
+    height: 100%;
+    pointer-events: none;
+}
+
+.sidenote-item {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    font-size: ${params.getSidenoteFontSize()}pt;
+    line-height: 1.5;
+    color: #495057;
+    padding-left: 1mm;
+    box-sizing: border-box;
+}
+
+.sidenote-number {
+    font-weight: 600;
+    color: #2e7d32;
+}
+
+.sidenote-continuation {
+    position: absolute;
+    bottom: 2mm;
+    left: 0;
+    width: 100%;
+    font-size: ${params.getSidenoteFontSize()}pt;
+    color: #6c757d;
+    font-style: italic;
+    text-align: right;
+    padding-right: 1mm;
+    box-sizing: border-box;
+}
+
+.sidenote-leaders {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
+}
+
 ${pageCss}
 </style>`;
     }
@@ -363,6 +419,10 @@ ${pageCss}
                     html += `<div class="footnote-item" data-num="${fn.number}">${this._escapeHtml(fn.text)}</div>`;
                 });
                 html += `</div>`;
+            }
+
+            if (page.sidenotes && page.sidenotes.length > 0) {
+                html += this._renderSidenotesForExport(page);
             }
 
             html += `</div>`;
@@ -413,6 +473,9 @@ ${pageCss}
                 break;
             case window.Types.BlockType.CROSS_REF:
                 innerHtml = this._renderCrossRefPiece(piece);
+                break;
+            case window.Types.BlockType.MARGIN_NOTE:
+                innerHtml = this._renderParagraphPiece(piece);
                 break;
         }
 
@@ -489,13 +552,21 @@ ${pageCss}
                         usedFootnoteNums.add(s.footnoteNumber);
                     }
                 }
+                if (s.type === window.Types.InlineStyleType.MARGIN_NOTE_REF) {
+                    if (s.noteNumber != null && !usedFootnoteNums.has(s.noteNumber)) {
+                        fnNum = s.noteNumber;
+                        usedFootnoteNums.add(s.noteNumber);
+                    }
+                }
             });
 
             const classAttr = classes.length ? ` class="${classes.join(' ')}"` : '';
-            let cleanText = this._escapeHtml(seg.text).replace(/¹|²|\[ref\]/g, '');
+            let cleanText = this._escapeHtml(seg.text).replace(/¹|²|ⁿ|\[ref\]/g, '');
 
             if (fnNum != null) {
-                html += `<span${classAttr}>${cleanText}<sup class="footnote-ref">${fnNum}</sup></span>`;
+                const isSidenote = styles.some(s => s.type === window.Types.InlineStyleType.MARGIN_NOTE_REF);
+                const refClass = isSidenote ? 'sidenote-ref' : 'footnote-ref';
+                html += `<span${classAttr}>${cleanText}<sup class="${refClass}" data-note-num="${fnNum}">${fnNum}</sup></span>`;
             } else {
                 html += `<span${classAttr}>${cleanText}</span>`;
             }
@@ -679,6 +750,80 @@ ${pageCss}
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    _renderSidenotesForExport(page) {
+        const params = this.layoutParams;
+        const sidenoteWidthMm = params.sidenoteWidthMm;
+        const contentWidthMm = params.pageWidthMm - params.marginLeftMm - params.marginRightMm;
+        const contentRightMm = params.marginLeftMm + contentWidthMm;
+        const contentLeftMm = params.marginLeftMm;
+
+        const sidenoteLeftMm = params.pageWidthMm - sidenoteWidthMm;
+
+        let html = `<div class="sidenote-area" style="right:0; width:${sidenoteWidthMm}mm;">`;
+
+        if (params.showSidenoteGutterLine) {
+            html += `<div style="position:absolute;top:0;left:-1mm;width:0.3pt;height:100%;background-color:#dee2e6;"></div>`;
+        }
+
+        const fontSizePt = params.getSidenoteFontSize();
+        const fontSizePx = ptToPx(fontSizePt);
+        const lineHeightPx = fontSizePx * 1.5;
+
+        let svgHtml = `<svg class="sidenote-leaders" xmlns="http://www.w3.org/2000/svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:visible;">`;
+
+        page.sidenotes.forEach(sidenote => {
+            const topMm = this._pxToMm(sidenote.top);
+            const heightMm = this._pxToMm(sidenote.height);
+
+            html += `<div class="sidenote-item" data-note-num="${sidenote.number}" style="top:${topMm}mm;">`;
+
+            const noteLines = window.LineBreaker.breakLinesMinRaggedness(
+                sidenote.text || '',
+                params.getSidenoteWidthPx(),
+                fontSizePx,
+                params.fontFamily
+            );
+
+            let noteText = `<span class="sidenote-number">${sidenote.number}</span> `;
+            noteLines.forEach(line => {
+                let lineText = '';
+                line.segments.forEach(seg => {
+                    lineText += this._escapeHtml(seg.text);
+                });
+                noteText += `<span style="display:block;">${lineText}</span>`;
+            });
+
+            html += noteText;
+            html += `</div>`;
+
+            const anchorTopMm = this._pxToMm(sidenote.anchorTop + params.fontSizePx * 0.3);
+            const noteTopMm = this._pxToMm(sidenote.top + fontSizePx * 0.4);
+
+            const anchorRightMm = contentLeftMm + this._pxToMm(sidenote.anchorLeft) + 0.5;
+            const noteLeftAbsMm = sidenoteLeftMm;
+
+            let pathD = '';
+            if (Math.abs(parseFloat(anchorTopMm) - parseFloat(noteTopMm)) < 0.5) {
+                pathD = `M ${anchorRightMm}mm ${anchorTopMm}mm L ${noteLeftAbsMm}mm ${noteTopMm}mm`;
+            } else {
+                pathD = `M ${anchorRightMm}mm ${anchorTopMm}mm L ${contentRightMm}mm ${anchorTopMm}mm L ${contentRightMm}mm ${noteTopMm}mm L ${noteLeftAbsMm}mm ${noteTopMm}mm`;
+            }
+
+            svgHtml += `<path d="${pathD}" stroke="#adb5bd" stroke-width="0.3pt" fill="none" data-note-num="${sidenote.number}" />`;
+        });
+
+        svgHtml += `</svg>`;
+
+        if (page.hasSidenoteContinuation) {
+            html += `<div class="sidenote-continuation">(续下页)</div>`;
+        }
+
+        html += svgHtml;
+        html += `</div>`;
+
+        return html;
     }
 
     _downloadFile(htmlContent) {

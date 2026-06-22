@@ -7,7 +7,8 @@ const BlockType = {
     TABLE: 'table',
     FOOTNOTE_REF: 'footnote',
     TOC: 'toc',
-    CROSS_REF: 'crossref'
+    CROSS_REF: 'crossref',
+    MARGIN_NOTE: 'marginnote'
 };
 
 const BlockTypeLabels = {
@@ -19,7 +20,8 @@ const BlockTypeLabels = {
     [BlockType.TABLE]: '📊 表格',
     [BlockType.FOOTNOTE_REF]: '📍 脚注引用',
     [BlockType.TOC]: '📑 目录',
-    [BlockType.CROSS_REF]: '🔗 交叉引用'
+    [BlockType.CROSS_REF]: '🔗 交叉引用',
+    [BlockType.MARGIN_NOTE]: '📝 页边批注'
 };
 
 const PaperPresets = {
@@ -78,6 +80,8 @@ class ContentBlock {
                 return { title: '目录' };
             case BlockType.CROSS_REF:
                 return { targetId: '', targetType: CrossRefTargetType.HEADING };
+            case BlockType.MARGIN_NOTE:
+                return { noteText: '', anchoredBlockId: '' };
             default:
                 return {};
         }
@@ -91,7 +95,7 @@ class LayoutParams {
         this.marginTopMm = 20;
         this.marginBottomMm = 20;
         this.marginLeftMm = 20;
-        this.marginRightMm = 20;
+        this.marginRightMm = 35;
         this.fontSizePt = 12;
         this.lineHeight = 1.5;
         this.paragraphSpacing = 0.5;
@@ -102,6 +106,8 @@ class LayoutParams {
         this.columnCount = 1;
         this.columnGapMm = 8;
         this.showColumnRule = false;
+        this.sidenoteWidthMm = 15;
+        this.showSidenoteGutterLine = true;
     }
 
     get pageWidthPx() { return mmToPx(this.pageWidthMm); }
@@ -146,6 +152,22 @@ class LayoutParams {
         return Math.max(8, this.fontSizePt * 0.75);
     }
 
+    getSidenoteFontSize() {
+        return Math.max(8, this.fontSizePt * 0.7);
+    }
+
+    getSidenoteWidthPx() {
+        return mmToPx(this.sidenoteWidthMm);
+    }
+
+    getSidenoteLeftPx() {
+        return this.pageWidthPx - mmToPx(this.sidenoteWidthMm);
+    }
+
+    getContentRightPx() {
+        return this.marginLeftPx + this.contentWidthPx;
+    }
+
     getHeadingFontSize(level) {
         const multipliers = { 1: 2.0, 2: 1.5, 3: 1.25 };
         return this.fontSizePt * (multipliers[level] || 1);
@@ -156,7 +178,8 @@ const InlineStyleType = {
     BOLD: 'bold',
     ITALIC: 'italic',
     FOOTNOTE_REF: 'footnote_ref',
-    CROSS_REF: 'cross_ref'
+    CROSS_REF: 'cross_ref',
+    MARGIN_NOTE_REF: 'margin_note_ref'
 };
 
 class InlineStyle {
