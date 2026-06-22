@@ -115,8 +115,7 @@ class StyleRuleEngine {
                     if (this._isHeading(prev)) {
                         if (!headingLevel) return true;
                         const level = parseInt(prev.type.substring(1));
-                        if (level === headingLevel) return true;
-                        if (level < headingLevel) return false;
+                        return level === headingLevel;
                     }
                 }
                 return false;
@@ -197,12 +196,12 @@ class StyleRuleEngine {
     }
 
     _mergeStyle(target, source) {
-        if (source.color != null) target.color = source.color;
-        if (source.backgroundColor != null) target.backgroundColor = source.backgroundColor;
-        if (source.leftIndentPx > 0) target.leftIndentPx = source.leftIndentPx;
-        if (source.firstLineIndentPx > 0) target.firstLineIndentPx = source.firstLineIndentPx;
-        if (source.dropCap) target.dropCap = true;
-        if (source.border) {
+        if (source.color !== null && source.color !== undefined) target.color = source.color;
+        if (source.backgroundColor !== null && source.backgroundColor !== undefined) target.backgroundColor = source.backgroundColor;
+        if (source.leftIndentPx !== null && source.leftIndentPx !== undefined) target.leftIndentPx = source.leftIndentPx;
+        if (source.firstLineIndentPx !== null && source.firstLineIndentPx !== undefined) target.firstLineIndentPx = source.firstLineIndentPx;
+        if (source.dropCap !== null && source.dropCap !== undefined) target.dropCap = source.dropCap;
+        if (source.border !== null && source.border !== undefined) {
             target.border = { ...source.border };
         }
     }

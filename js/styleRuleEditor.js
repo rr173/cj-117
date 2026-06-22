@@ -103,47 +103,51 @@ class StyleRuleEditor {
                 <div class="rule-section">
                     <div class="rule-section-header">
                         <span>应用样式</span>
+                        <span style="font-size:11px;color:var(--color-text-light);">留空/不选表示不设置，继承前面规则的效果</span>
                     </div>
                     <div class="rule-style-grid">
                         <div class="param-row">
                             <label>字体颜色</label>
                             <div style="display: flex; gap: 6px; align-items: center;">
-                                <input type="color" data-style="color" value="${style.color || '#000000'}">
+                                <input type="color" data-style="color" value="${style.color || '#000000'}" ${style.color ? '' : 'disabled style="opacity:0.5;"'}>
                                 <input type="text" data-style="color-text" value="${style.color || ''}" placeholder="留空不设置" style="flex:1;padding:4px 8px;border:1px solid var(--color-border);border-radius:4px;font-size:12px;">
                             </div>
                         </div>
                         <div class="param-row">
                             <label>背景色</label>
                             <div style="display: flex; gap: 6px; align-items: center;">
-                                <input type="color" data-style="bgColor" value="${style.backgroundColor || '#ffffff'}">
+                                <input type="color" data-style="bgColor" value="${style.backgroundColor || '#ffffff'}" ${style.backgroundColor ? '' : 'disabled style="opacity:0.5;"'}>
                                 <input type="text" data-style="bgColor-text" value="${style.backgroundColor || ''}" placeholder="留空不设置" style="flex:1;padding:4px 8px;border:1px solid var(--color-border);border-radius:4px;font-size:12px;">
                             </div>
                         </div>
                         <div class="param-row">
                             <label>左缩进 (px)</label>
-                            <input type="number" data-style="leftIndentPx" value="${style.leftIndentPx || 0}" min="0" max="200">
+                            <input type="number" data-style="leftIndentPx" value="${style.leftIndentPx !== null ? style.leftIndentPx : ''}" placeholder="不设置" min="0" max="200">
                         </div>
                         <div class="param-row">
                             <label>首行缩进 (px)</label>
-                            <input type="number" data-style="firstLineIndentPx" value="${style.firstLineIndentPx || 0}" min="0" max="200">
+                            <input type="number" data-style="firstLineIndentPx" value="${style.firstLineIndentPx !== null ? style.firstLineIndentPx : ''}" placeholder="不设置" min="0" max="200">
                         </div>
                         <div class="param-row">
-                            <label class="checkbox-label">
-                                <input type="checkbox" data-style="dropCap" ${style.dropCap ? 'checked' : ''}>
-                                首字下沉（段落首字放大占两行）
-                            </label>
+                            <label>首字下沉</label>
+                            <select data-style="dropCap">
+                                <option value="" ${style.dropCap === null ? 'selected' : ''}>不设置</option>
+                                <option value="true" ${style.dropCap === true ? 'selected' : ''}>开启</option>
+                                <option value="false" ${style.dropCap === false ? 'selected' : ''}>关闭</option>
+                            </select>
                         </div>
                         <div class="param-row" style="grid-column: 1 / -1;">
                             <label>边框</label>
                             <div style="display: grid; grid-template-columns: 1fr 80px 1fr 60px; gap: 6px; align-items: center;">
                                 <select data-style="borderStyle">
+                                    <option value="" ${!border || !border.style || border.style === '' ? 'selected' : ''}>不设置</option>
                                     ${window.Types.RuleBorderStyleOptions.map(o =>
-                                        `<option value="${o.value}" ${border.style === o.value ? 'selected' : ''}>${o.label}</option>`
+                                        `<option value="${o.value}" ${border && border.style === o.value ? 'selected' : ''}>${o.label}</option>`
                                     ).join('')}
                                 </select>
-                                <input type="number" data-style="borderWidth" value="${border.width || 1}" min="0" max="20" placeholder="宽度">
-                                <input type="color" data-style="borderColor" value="${border.color || '#000000'}">
-                                <input type="number" data-style="borderRadius" value="${border.radius || 0}" min="0" max="50" placeholder="圆角">
+                                <input type="number" data-style="borderWidth" value="${border && border.width ? border.width : ''}" placeholder="宽度" min="0" max="20">
+                                <input type="color" data-style="borderColor" value="${border && border.color ? border.color : '#000000'}" ${border && border.style && border.style !== '' && border.style !== 'none' ? '' : 'disabled style="opacity:0.5;"'}>
+                                <input type="number" data-style="borderRadius" value="${border && border.radius ? border.radius : ''}" placeholder="圆角" min="0" max="50">
                             </div>
                         </div>
                     </div>
@@ -377,23 +381,61 @@ class StyleRuleEditor {
         } else if (key === 'bgColor-text') {
             style.backgroundColor = el.value || null;
         } else if (key === 'leftIndentPx') {
-            style.leftIndentPx = parseInt(el.value) || 0;
+            if (el.value === '' || el.value === null) {
+                style.leftIndentPx = null;
+            } else {
+                const val = parseInt(el.value);
+                style.leftIndentPx = isNaN(val) ? null : val;
+            }
         } else if (key === 'firstLineIndentPx') {
-            style.firstLineIndentPx = parseInt(el.value) || 0;
+            if (el.value === '' || el.value === null) {
+                style.firstLineIndentPx = null;
+            } else {
+                const val = parseInt(el.value);
+                style.firstLineIndentPx = isNaN(val) ? null : val;
+            }
         } else if (key === 'dropCap') {
-            style.dropCap = el.checked;
+            if (el.value === '' || el.value === null) {
+                style.dropCap = null;
+            } else {
+                style.dropCap = el.value === 'true';
+            }
         } else if (key === 'borderStyle') {
-            if (!style.border) style.border = { style: 'none', width: 1, color: '#000000', radius: 0 };
-            style.border.style = el.value;
+            if (el.value === '' || el.value === null) {
+                style.border = null;
+            } else {
+                if (!style.border) {
+                    style.border = { style: el.value, width: 1, color: '#000000', radius: 0 };
+                } else {
+                    style.border = { ...style.border, style: el.value };
+                }
+            }
         } else if (key === 'borderWidth') {
-            if (!style.border) style.border = { style: 'none', width: 1, color: '#000000', radius: 0 };
-            style.border.width = parseInt(el.value) || 1;
+            if (!style.border) {
+                style.border = { style: 'solid', width: 1, color: '#000000', radius: 0 };
+            }
+            if (el.value === '' || el.value === null) {
+                style.border.width = 1;
+            } else {
+                const val = parseInt(el.value);
+                style.border.width = isNaN(val) ? 1 : val;
+            }
         } else if (key === 'borderColor') {
-            if (!style.border) style.border = { style: 'none', width: 1, color: '#000000', radius: 0 };
-            style.border.color = el.value;
+            if (!style.border) {
+                style.border = { style: 'solid', width: 1, color: el.value, radius: 0 };
+            } else {
+                style.border = { ...style.border, color: el.value };
+            }
         } else if (key === 'borderRadius') {
-            if (!style.border) style.border = { style: 'none', width: 1, color: '#000000', radius: 0 };
-            style.border.radius = parseInt(el.value) || 0;
+            if (!style.border) {
+                style.border = { style: 'solid', width: 1, color: '#000000', radius: 0 };
+            }
+            if (el.value === '' || el.value === null) {
+                style.border.radius = 0;
+            } else {
+                const val = parseInt(el.value);
+                style.border.radius = isNaN(val) ? 0 : val;
+            }
         }
 
         this.ruleEngine.updateRule(rule.id, { style: { ...style } });

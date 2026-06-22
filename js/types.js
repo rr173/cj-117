@@ -239,9 +239,9 @@ class StyleRuleStyle {
     constructor() {
         this.color = null;
         this.backgroundColor = null;
-        this.leftIndentPx = 0;
-        this.firstLineIndentPx = 0;
-        this.dropCap = false;
+        this.leftIndentPx = null;
+        this.firstLineIndentPx = null;
+        this.dropCap = null;
         this.border = null;
     }
 }
