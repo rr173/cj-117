@@ -779,20 +779,29 @@ ${pageCss}
 
             html += `<div class="sidenote-item" data-note-num="${sidenote.number}" style="top:${topMm}mm;">`;
 
+            const fullText = sidenote.number + ' ' + (sidenote.text || '');
             const noteLines = window.LineBreaker.breakLinesMinRaggedness(
-                sidenote.text || '',
+                fullText,
                 params.getSidenoteWidthPx(),
                 fontSizePx,
                 params.fontFamily
             );
 
-            let noteText = `<span class="sidenote-number">${sidenote.number}</span> `;
+            let noteText = '';
+            let isFirstLine = true;
             noteLines.forEach(line => {
                 let lineText = '';
                 line.segments.forEach(seg => {
                     lineText += this._escapeHtml(seg.text);
                 });
-                noteText += `<span style="display:block;">${lineText}</span>`;
+                if (isFirstLine) {
+                    const numStr = String(sidenote.number) + ' ';
+                    if (lineText.startsWith(numStr)) {
+                        lineText = `<span class="sidenote-number">${numStr}</span>${lineText.substring(numStr.length)}`;
+                    }
+                    isFirstLine = false;
+                }
+                noteText += `<span style="display:block;font-size:${fontSizePx}px;line-height:${lineHeightPx}px;height:${lineHeightPx}px;overflow:hidden;white-space:nowrap;">${lineText}</span>`;
             });
 
             html += noteText;

@@ -424,22 +424,27 @@ class PaginationEngine {
         return this.layoutParams.lineHeightPx;
     }
 
-    getSidenoteHeight(block) {
+    getSidenoteHeight(block, sidenoteNumber) {
         const fontSizePx = ptToPx(this.layoutParams.getSidenoteFontSize());
         const lineHeightPx = fontSizePx * 1.5;
         const sidenoteWidth = this.layoutParams.getSidenoteWidthPx();
 
+        const numStr = sidenoteNumber ? String(sidenoteNumber) + ' ' : '';
+        const numberWidth = numStr.length > 0 ? fontSizePx * (numStr.length * 0.6 + 0.5) : 0;
+        const availableWidth = Math.max(sidenoteWidth - numberWidth, fontSizePx * 3);
+
+        const fullText = (numStr) + (block.data.noteText || '');
+
         const lines = window.LineBreaker.breakLinesMinRaggedness(
-            block.data.noteText || '',
+            fullText,
             sidenoteWidth,
             fontSizePx,
             this.layoutParams.fontFamily
         );
 
-        const numberWidth = fontSizePx * 1.5;
         const adjustedLines = lines.length > 0 ? lines.length : 1;
 
-        return adjustedLines * lineHeightPx + 4;
+        return adjustedLines * lineHeightPx + 8;
     }
 
     calculateSidenotePositions(page, pendingSidenotes) {
@@ -453,15 +458,27 @@ class PaginationEngine {
 
         let currentTop = page.availableTop;
 
-        pendingSidenotes.forEach(sidenote => {
-            const noteHeight = this.getSidenoteHeight({ data: { noteText: sidenote.text } });
+        console.log('[DEBUG calculateSidenotePositions] page.availableTop:', page.availableTop, 'contentHeight:', contentHeight, 'footnoteAreaHeight:', page.footnoteAreaHeight);
+        console.log('[DEBUG calculateSidenotePositions] pendingSidenotes:', pendingSidenotes.map(s => ({
+            num: s.number, anchorTop: s.anchorTop, text: s.text.substring(0, 20)
+        })));
+
+        pendingSidenotes.forEach((sidenote, idx) => {
+            const noteHeight = this.getSidenoteHeight({ data: { noteText: sidenote.text } }, sidenote.number);
             let targetTop = sidenote.anchorTop;
 
+            console.log(`[DEBUG sidenote ${idx}] before: anchorTop=${sidenote.anchorTop}, noteHeight=${noteHeight}, currentTop=${currentTop}`);
+
             if (targetTop < currentTop) {
+                console.log(`[DEBUG sidenote ${idx}] adjusting targetTop from ${targetTop} to ${currentTop}`);
                 targetTop = currentTop;
             }
 
-            if (targetTop + noteHeight > contentHeight - page.footnoteAreaHeight) {
+            const maxAllowedTop = contentHeight - page.footnoteAreaHeight - noteHeight;
+            console.log(`[DEBUG sidenote ${idx}] targetTop=${targetTop}, maxAllowedTop=${maxAllowedTop}`);
+
+            if (targetTop > maxAllowedTop) {
+                console.log(`[DEBUG sidenote ${idx}] overflowing`);
                 overflowSidenotes.push(sidenote);
             } else {
                 positionedSidenotes.push({
@@ -471,7 +488,13 @@ class PaginationEngine {
                     width: sidenoteWidth
                 });
                 currentTop = targetTop + noteHeight + 6;
+                console.log(`[DEBUG sidenote ${idx}] positioned at top=${targetTop}, new currentTop=${currentTop}`);
             }
+        });
+
+        console.log('[DEBUG calculateSidenotePositions] result:', {
+            positioned: positionedSidenotes.map(s => ({ num: s.number, top: s.top, height: s.height })),
+            overflow: overflowSidenotes.map(s => s.number)
         });
 
         return { positioned: positionedSidenotes, overflow: overflowSidenotes };
@@ -1551,7 +1574,7 @@ class PaginationEngine {
                 if (remaining > 20) {
                     const newSidenotes = [];
                     for (const sn of pendingOverflowSidenotes) {
-                        const noteHeight = this.getSidenoteHeight({ data: { noteText: sn.text } });
+                        const noteHeight = this.getSidenoteHeight({ data: { noteText: sn.text } }, sn.number);
                         if (currentTop + noteHeight < contentHeight - lastPage.footnoteAreaHeight) {
                             newSidenotes.push({
                                 ...sn,

@@ -601,6 +601,10 @@ class PreviewRenderer {
 
         const notePositions = new Map();
 
+        console.log('[DEBUG] page.sidenotes:', JSON.stringify(page.sidenotes.map(s => ({
+            num: s.number, top: s.top, height: s.height, anchorTop: s.anchorTop, text: s.text.substring(0, 20)
+        })), null, 2));
+
         page.sidenotes.forEach((sidenote, idx) => {
             notePositions.set(sidenote.number, {
                 top: sidenote.top,
@@ -626,20 +630,29 @@ class PreviewRenderer {
                 box-sizing: border-box;
             `;
 
+            const fullText = sidenote.number + ' ' + (sidenote.text || '');
             const noteLines = window.LineBreaker.breakLinesMinRaggedness(
-                sidenote.text || '',
+                fullText,
                 sidenoteWidth,
                 fontSizePx,
                 this.layoutParams.fontFamily
             );
 
-            let noteHtml = `<span class="sidenote-number" style="font-weight:600;color:#2e7d32;">${sidenote.number}</span> `;
+            let noteHtml = '';
+            let isFirstLine = true;
             noteLines.forEach(line => {
                 let lineText = '';
                 line.segments.forEach(seg => {
                     lineText += this._escapeHtml(seg.text);
                 });
-                noteHtml += `<span class="rendered-line" style="display:block;">${lineText}</span>`;
+                if (isFirstLine) {
+                    const numStr = String(sidenote.number) + ' ';
+                    if (lineText.startsWith(numStr)) {
+                        lineText = `<span class="sidenote-number" style="font-weight:600;color:#2e7d32;">${numStr}</span>${lineText.substring(numStr.length)}`;
+                    }
+                    isFirstLine = false;
+                }
+                noteHtml += `<span class="rendered-line" style="display:block;font-size:${fontSizePx}px;line-height:${lineHeightPx}px;height:${lineHeightPx}px;overflow:hidden;white-space:nowrap;">${lineText}</span>`;
             });
 
             noteEl.innerHTML = noteHtml;
